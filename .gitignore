@@ -1,5 +1,5 @@
 env
 notes
-*.json
+#*.json
 __pycache__
 covers

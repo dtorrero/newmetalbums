@@ -593,8 +593,63 @@ class MetalArchivesScraper:
             
             album['tracklist'] = tracklist or []
             
+            # Extract Bandcamp link from band page
+            if album.get('band_url'):
+                bandcamp_url = await self._extract_bandcamp_link(album['band_url'])
+                if bandcamp_url:
+                    album['bandcamp_url'] = bandcamp_url
+            
         except Exception as e:
             logger.error(f"Error enriching album data for {album['album_name']}: {str(e)}")
+
+    async def _extract_bandcamp_link(self, band_url: str) -> Optional[str]:
+        """Extract Bandcamp link from band page Related Links AJAX endpoint."""
+        try:
+            logger.debug(f"Extracting Bandcamp link from: {band_url}")
+            
+            # Extract band ID from URL
+            band_id = self._extract_id_from_url(band_url, BAND_ID_PATTERN)
+            if not band_id:
+                logger.warning(f"Could not extract band ID from: {band_url}")
+                return None
+            
+            # Construct Related Links AJAX URL
+            links_url = f"https://www.metal-archives.com/link/ajax-list/type/band/id/{band_id}"
+            logger.debug(f"Fetching Related Links from: {links_url}")
+            
+            # Navigate to the AJAX endpoint
+            content = await self._navigate_to_url(links_url)
+            if not content:
+                logger.warning(f"Failed to load Related Links: {links_url}")
+                return None
+            
+            # Extract Bandcamp URL from the AJAX response
+            bandcamp_url = await self.page.evaluate('''() => {
+                console.log('Searching for Bandcamp links in AJAX response...');
+                
+                // Look for any bandcamp.com links
+                const bandcampLinks = document.querySelectorAll('a[href*="bandcamp.com"]');
+                console.log('Found', bandcampLinks.length, 'bandcamp.com links');
+                
+                if (bandcampLinks.length > 0) {
+                    const link = bandcampLinks[0];
+                    console.log('Found Bandcamp link:', link.href, 'Text:', link.textContent);
+                    return link.href;
+                }
+                
+                return null;
+            }''')
+            
+            if bandcamp_url:
+                logger.info(f"Found Bandcamp link: {bandcamp_url}")
+                return bandcamp_url
+            else:
+                logger.debug("No Bandcamp link found in Related Links")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Bandcamp link: {str(e)}")
+            return None
 
     async def download_cover(self, album: Dict, covers_dir: Path = None) -> Optional[str]:
         """Download album cover art."""
