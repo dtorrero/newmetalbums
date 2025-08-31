@@ -431,6 +431,8 @@ class MetalArchivesScraper:
                 'release_date_raw': release_date_raw,
                 'type': album_type,
                 'cover_art': None,
+                'cover_path': None,
+                'bandcamp_url': None,
                 'tracklist': [],
                 'details': {}
             }
@@ -514,12 +516,30 @@ class MetalArchivesScraper:
             
             # Extract cover art URL
             cover_art = await self.page.evaluate('''() => {
-                const img = document.querySelector('a.image img.album_img, img[src*="albums"]');
+                // Try multiple selectors for cover art
+                let img = document.querySelector('a.image img');
+                if (!img) img = document.querySelector('img.album_img');
+                if (!img) img = document.querySelector('img[src*="albums"]');
+                if (!img) img = document.querySelector('#album_img img');
+                if (!img) img = document.querySelector('.album_img');
+                if (!img) {
+                    // Look for any image in the album info area
+                    const albumInfo = document.querySelector('#album_info');
+                    if (albumInfo) {
+                        img = albumInfo.querySelector('img');
+                    }
+                }
+                
+                console.log('Found cover image:', img ? img.src : 'none');
                 return img ? img.src : null;
             }''')
             
             if cover_art:
                 album['cover_art'] = cover_art
+                # Download the cover
+                cover_path = await self.download_cover(album)
+                if cover_path:
+                    album['cover_path'] = cover_path
             
             # Extract album details
             details = await self.page.evaluate('''() => {
@@ -585,6 +605,9 @@ class MetalArchivesScraper:
             covers_dir = config.COVERS_DIR
             
         try:
+            # Ensure covers directory exists
+            covers_dir.mkdir(parents=True, exist_ok=True)
+            
             cover_url = album['cover_art']
             album_id = album.get('album_id', 'unknown')
             
@@ -592,17 +615,24 @@ class MetalArchivesScraper:
             filename = f"{album_id}.jpg"
             filepath = covers_dir / filename
             
-            # Download the image
+            # Download the image using requests-like approach with Playwright
             logger.debug(f"Downloading cover: {cover_url}")
             
-            # Use Playwright to download the image
-            async with self.page.expect_download() as download_info:
-                await self.page.goto(cover_url)
-            download = await download_info.value
-            await download.save_as(filepath)
-            
-            logger.info(f"Downloaded cover: {filepath}")
-            return str(filepath)
+            # Navigate to the image URL and get the response
+            response = await self.page.goto(cover_url)
+            if response and response.status == 200:
+                # Get the image data
+                image_data = await response.body()
+                
+                # Write to file
+                with open(filepath, 'wb') as f:
+                    f.write(image_data)
+                
+                logger.info(f"Downloaded cover: {filepath}")
+                return str(filepath)
+            else:
+                logger.warning(f"Failed to download cover, status: {response.status if response else 'No response'}")
+                return None
             
         except Exception as e:
             logger.error(f"Error downloading cover for {album['album_name']}: {str(e)}")

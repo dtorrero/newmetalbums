@@ -26,6 +26,7 @@ class Album(BaseModel):
     type: str = ""
     cover_art: Optional[str] = None
     cover_path: Optional[str] = None
+    bandcamp_url: Optional[str] = None
     tracklist: List[Track] = []
     details: Dict[str, Any] = {}
     
