@@ -1,0 +1,5 @@
+env
+notes
+*.json
+__pycache__
+covers
