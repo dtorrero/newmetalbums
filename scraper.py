@@ -764,15 +764,15 @@ class MetalArchivesScraper:
 def parse_date(date_str: str) -> date:
     """Parse a date string into a date object."""
     try:
-        return datetime.strptime(date_str, '%Y-%m-%d').date()
+        return datetime.strptime(date_str, '%d-%m-%Y').date()
     except ValueError:
-        raise ValueError(f"Invalid date format: {date_str}. Expected format: YYYY-MM-DD")
+        raise ValueError(f"Invalid date format: {date_str}. Expected format: DD-MM-YYYY")
 
 
 async def main():
     """Main function to run the improved scraper."""
     parser = argparse.ArgumentParser(description='Scrape Metal Archives for albums released on a specific date.')
-    parser.add_argument('date', type=parse_date, help='Date in YYYY-MM-DD format')
+    parser.add_argument('date', type=parse_date, help='Date in DD-MM-YYYY format')
     parser.add_argument('--output', '-o', type=str, default='albums.json', help='Output JSON file')
     parser.add_argument('--headless', action='store_true', help='Run in headless mode (default: False)')
     parser.add_argument('--download-covers', action='store_true', help='Download album covers')
