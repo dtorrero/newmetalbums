@@ -773,10 +773,15 @@ async def main():
     """Main function to run the improved scraper."""
     parser = argparse.ArgumentParser(description='Scrape Metal Archives for albums released on a specific date.')
     parser.add_argument('date', type=parse_date, help='Date in DD-MM-YYYY format')
-    parser.add_argument('--output', '-o', type=str, default='albums.json', help='Output JSON file')
+    parser.add_argument('--output', '-o', type=str, default=None, help='Output JSON file (default: albums_DD-MM-YYYY.json)')
     parser.add_argument('--headless', action='store_true', help='Run in headless mode (default: False)')
     parser.add_argument('--download-covers', action='store_true', help='Download album covers')
     args = parser.parse_args()
+    
+    # Generate default filename if no output specified
+    if args.output is None:
+        date_str = args.date.strftime('%d-%m-%Y')
+        args.output = f'albums_{date_str}.json'
     
     # Ensure covers directory exists
     config.COVERS_DIR.mkdir(exist_ok=True, parents=True)
