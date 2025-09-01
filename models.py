@@ -16,6 +16,12 @@ class Band(BaseModel):
     url: str
     id: str = ""
     bandcamp_links: List[BandLink] = []
+    country_of_origin: str = ""
+    location: str = ""
+    genre: str = ""
+    themes: str = ""
+    current_label: str = ""
+    years_active: str = ""
 
 class Album(BaseModel):
     title: str = Field(alias='album_name')
@@ -39,7 +45,13 @@ class Album(BaseModel):
         band = Band(
             name=data.get('band_name', ''),
             url=data.get('band_url', ''),
-            id=data.get('band_id', '')
+            id=data.get('band_id', ''),
+            country_of_origin=data.get('country_of_origin', ''),
+            location=data.get('location', ''),
+            genre=data.get('genre', ''),
+            themes=data.get('themes', ''),
+            current_label=data.get('current_label', ''),
+            years_active=data.get('years_active', '')
         )
         
         tracks = [

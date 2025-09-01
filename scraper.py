@@ -593,14 +593,72 @@ class MetalArchivesScraper:
             
             album['tracklist'] = tracklist or []
             
-            # Extract Bandcamp link from band page
+            # Extract band details and Bandcamp link from band page
             if album.get('band_url'):
+                # Extract band details
+                band_details = await self._extract_band_details(album['band_url'])
+                album.update(band_details)
+                
+                # Extract Bandcamp link
                 bandcamp_url = await self._extract_bandcamp_link(album['band_url'])
                 if bandcamp_url:
                     album['bandcamp_url'] = bandcamp_url
             
         except Exception as e:
             logger.error(f"Error enriching album data for {album['album_name']}: {str(e)}")
+
+    async def _extract_band_details(self, band_url: str) -> Dict[str, str]:
+        """Extract band details from band page."""
+        try:
+            logger.debug(f"Extracting band details from: {band_url}")
+            
+            # Navigate to the band page
+            content = await self._navigate_to_url(band_url)
+            if not content:
+                logger.warning(f"Failed to load band page: {band_url}")
+                return {}
+            
+            # Extract band information from the band_info section
+            band_details = await self.page.evaluate('''() => {
+                const info = {};
+                const bandInfoDiv = document.querySelector('#band_info');
+                
+                if (bandInfoDiv) {
+                    const dts = bandInfoDiv.querySelectorAll('dt');
+                    const dds = bandInfoDiv.querySelectorAll('dd');
+                    
+                    dts.forEach((dt, i) => {
+                        if (dds[i]) {
+                            const key = dt.textContent.trim().toLowerCase();
+                            const value = dds[i].textContent.trim();
+                            
+                            // Map the keys to our expected field names
+                            if (key.includes('country of origin')) {
+                                info['country_of_origin'] = value;
+                            } else if (key.includes('location')) {
+                                info['location'] = value;
+                            } else if (key.includes('genre')) {
+                                info['genre'] = value;
+                            } else if (key.includes('themes')) {
+                                info['themes'] = value;
+                            } else if (key.includes('current label')) {
+                                info['current_label'] = value;
+                            } else if (key.includes('years active')) {
+                                info['years_active'] = value;
+                            }
+                        }
+                    });
+                }
+                
+                return info;
+            }''')
+            
+            logger.debug(f"Extracted band details: {band_details}")
+            return band_details or {}
+            
+        except Exception as e:
+            logger.error(f"Error extracting band details from {band_url}: {str(e)}")
+            return {}
 
     async def _extract_bandcamp_link(self, band_url: str) -> Optional[str]:
         """Extract Bandcamp link from band page Related Links AJAX endpoint."""
