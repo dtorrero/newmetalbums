@@ -540,6 +540,9 @@ class MetalArchivesScraper:
                 cover_path = await self.download_cover(album)
                 if cover_path:
                     album['cover_path'] = cover_path
+                
+                # Navigate back to the album page after downloading cover
+                await self._navigate_to_url(album['album_url'])
             
             # Extract album details
             details = await self.page.evaluate('''() => {
@@ -566,31 +569,8 @@ class MetalArchivesScraper:
             
             album['details'] = details or {}
             
-            # Extract tracklist
-            tracklist = await self.page.evaluate('''() => {
-                const tracks = [];
-                const rows = document.querySelectorAll('table.table_lyrics tr');
-                
-                rows.forEach(row => {
-                    const cells = row.querySelectorAll('td');
-                    if (cells.length >= 2) {
-                        const trackNum = cells[0]?.textContent?.trim() || '';
-                        const trackName = cells[1]?.textContent?.trim() || '';
-                        const trackLength = cells[2]?.textContent?.trim() || '';
-                        
-                        if (trackNum && trackName) {
-                            tracks.push({
-                                number: trackNum,
-                                name: trackName,
-                                length: trackLength
-                            });
-                        }
-                    }
-                });
-                
-                return tracks;
-            }''')
-            
+            # Extract tracklist from Songs tab
+            tracklist = await self._extract_tracklist()
             album['tracklist'] = tracklist or []
             
             # Extract band details and Bandcamp link from band page
@@ -606,6 +586,121 @@ class MetalArchivesScraper:
             
         except Exception as e:
             logger.error(f"Error enriching album data for {album['album_name']}: {str(e)}")
+
+    async def _extract_tracklist(self) -> List[Dict[str, str]]:
+        """Extract tracklist from the Songs tab of the album page."""
+        try:
+            # Wait for page to be fully loaded
+            await asyncio.sleep(3)
+            
+            # Try to activate Songs tab if present, but don't fail if not found
+            try:
+                songs_tab_clicked = await self.page.evaluate('''() => {
+                    // Look for Songs tab and click it
+                    const tabElements = document.querySelectorAll('a.ui-tabs-anchor, a[href*="songs"], *');
+                    for (let element of tabElements) {
+                        const text = element.textContent?.trim().toLowerCase();
+                        if (text === 'songs' && element.click) {
+                            element.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }''')
+                
+                if songs_tab_clicked:
+                    logger.debug("Clicked on Songs tab")
+                    await asyncio.sleep(2)
+                else:
+                    logger.debug("No Songs tab found, trying direct extraction")
+            except Exception as e:
+                logger.debug(f"Tab clicking failed: {e}, trying direct extraction")
+            
+            
+            
+            # Extract tracklist data
+            tracks = await self.page.evaluate('''() => {
+                const tracks = [];
+                
+                // Look for the standard Metal Archives tracklist table
+                const trackTable = document.querySelector('table.table_lyrics');
+                
+                if (trackTable) {
+                    const rows = trackTable.querySelectorAll('tr');
+                    
+                    rows.forEach((row, index) => {
+                        const cells = row.querySelectorAll('td');
+                        if (cells.length >= 2) {
+                            const trackNum = cells[0]?.textContent?.trim() || '';
+                            const trackName = cells[1]?.textContent?.trim() || '';
+                            const trackLength = cells[2]?.textContent?.trim() || '';
+                            
+                            // Skip rows with "(loading lyrics...)" or empty track numbers
+                            if (trackName.includes('(loading lyrics...)') || !trackNum) {
+                                return;
+                            }
+                            
+                            // Validate track number (should be a number followed by optional dot)
+                            if (trackNum.match(/^\d+\.?$/)) {
+                                const track = {
+                                    number: trackNum.replace('.', ''),
+                                    name: trackName,
+                                    length: trackLength || ''
+                                };
+                                
+                                // Check for lyrics link
+                                const lyricsLink = cells[1]?.querySelector('a[href*="lyrics"]');
+                                if (lyricsLink) {
+                                    track.lyrics_url = lyricsLink.href;
+                                }
+                                
+                                tracks.push(track);
+                            }
+                        }
+                    });
+                }
+                
+                // If no tracks found in table, try alternative methods
+                if (tracks.length === 0) {
+                    // Look for track listings in page content
+                    const allText = document.body.textContent;
+                    const lines = allText.split('\\n');
+                    
+                    lines.forEach(line => {
+                        const trimmed = line.trim();
+                        // Match patterns like "1. Song Name" or "1. Song Name 04:24"
+                        const match = trimmed.match(/^(\d+)\.?\s+(.+?)(?:\s+(\d{1,2}:\d{2}))?$/);
+                        if (match) {
+                            const [, num, name, duration] = match;
+                            const trackNum = parseInt(num);
+                            
+                            // Only add if it's a reasonable track and we don't already have it
+                            if (trackNum > 0 && trackNum <= 20 && 
+                                !tracks.find(t => t.number === num) &&
+                                name.length > 1 && name.length < 100 &&
+                                !name.includes('(loading lyrics...)')) {
+                                tracks.push({
+                                    number: num,
+                                    name: name.trim(),
+                                    length: duration || ''
+                                });
+                            }
+                        }
+                    });
+                    
+                    // Sort by track number
+                    tracks.sort((a, b) => parseInt(a.number) - parseInt(b.number));
+                }
+                
+                return tracks;
+            }''')
+            
+            logger.debug(f"Extracted {len(tracks)} tracks from tracklist")
+            return tracks
+            
+        except Exception as e:
+            logger.error(f"Error extracting tracklist: {str(e)}")
+            return []
 
     async def _extract_band_details(self, band_url: str) -> Dict[str, str]:
         """Extract band details from band page."""
