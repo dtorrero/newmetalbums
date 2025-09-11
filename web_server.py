@@ -204,6 +204,11 @@ frontend_build_path = Path(__file__).parent / "frontend" / "build"
 if frontend_build_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_build_path / "static")), name="static")
 
+# Mount covers directory for album cover images
+covers_path = Path(__file__).parent / "covers"
+if covers_path.exists():
+    app.mount("/covers", StaticFiles(directory=str(covers_path)), name="covers")
+
 class WebServer:
     """Web server wrapper for integration with orchestrator"""
     

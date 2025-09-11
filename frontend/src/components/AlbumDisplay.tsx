@@ -71,9 +71,18 @@ const AlbumDisplay: React.FC = () => {
   };
 
   const getCoverImageUrl = (album: Album) => {
+    // First try local cover file if available
     if (album.cover_path && album.cover_path !== 'N/A') {
-      return `http://127.0.0.1:8000/covers/${album.cover_path}`;
+      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+      // cover_path already includes 'covers/' prefix, so just add base URL
+      return `${baseUrl}/${album.cover_path}`;
     }
+    // Fallback to album_id.jpg if cover_path not available
+    if (album.album_id) {
+      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+      return `${baseUrl}/covers/${album.album_id}.jpg`;
+    }
+    // Final fallback to external cover URL
     return album.cover_art && album.cover_art !== 'N/A' ? album.cover_art : null;
   };
 
@@ -133,32 +142,40 @@ const AlbumDisplay: React.FC = () => {
             {albums.map((album) => (
               <Card key={album.id} elevation={3} sx={{ display: 'flex', minHeight: 300 }}>
                   {/* Album Cover */}
-                  <Box sx={{ width: 250, flexShrink: 0 }}>
-                    {getCoverImageUrl(album) ? (
-                      <CardMedia
-                        component="img"
-                        sx={{ width: 250, height: 250, objectFit: 'cover' }}
-                        image={getCoverImageUrl(album) || ''}
-                        alt={`${album.album_name} cover`}
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <Box
-                        sx={{
-                          width: 250,
-                          height: 250,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          bgcolor: 'grey.200',
-                        }}
-                      >
-                        <AlbumIcon sx={{ fontSize: 80, color: 'grey.400' }} />
-                      </Box>
-                    )}
+                  <Box sx={{ width: 250, flexShrink: 0, position: 'relative' }}>
+                    <Box
+                      sx={{
+                        width: 250,
+                        height: 250,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        bgcolor: 'grey.800',
+                        border: '1px solid',
+                        borderColor: 'grey.700',
+                      }}
+                    >
+                      {getCoverImageUrl(album) ? (
+                        <CardMedia
+                          component="img"
+                          sx={{ 
+                            width: '100%', 
+                            height: '100%', 
+                            objectFit: 'cover',
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                          }}
+                          image={getCoverImageUrl(album) || ''}
+                          alt={`${album.album_name} cover`}
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                          }}
+                        />
+                      ) : null}
+                      <AlbumIcon sx={{ fontSize: 80, color: 'grey.500', zIndex: 1 }} />
+                    </Box>
                   </Box>
 
                   {/* Album Details */}
