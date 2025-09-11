@@ -14,6 +14,7 @@ import sys
 import time
 import schedule
 from typing import Optional
+from web_server import WebServer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -162,10 +163,17 @@ class DailyOrchestrator:
         finally:
             self.is_running = False
     
-    def start_scheduler(self):
-        """Start the continuous scheduler"""
+    def start_scheduler(self, with_web_server: bool = True):
+        """Start the continuous scheduler with optional web server"""
         logger.info(f"🕐 Starting daily scheduler - will run at {self.daily_time} every day")
         logger.info(f"📍 Current time: {datetime.now().strftime('%H:%M:%S')}")
+        
+        # Start web server if requested
+        web_server = None
+        if with_web_server:
+            web_server = WebServer()
+            web_server.start()
+            logger.info("🌐 Web interface available at http://127.0.0.1:8000")
         
         # Schedule daily task
         schedule.every().day.at(self.daily_time).do(self.run_scheduled_task)
@@ -183,9 +191,29 @@ class DailyOrchestrator:
                 time.sleep(60)  # Check every minute
         except KeyboardInterrupt:
             logger.info("\n⏹️ Scheduler stopped by user")
+            if web_server:
+                web_server.stop()
         except Exception as e:
             logger.error(f"💥 Scheduler error: {e}")
+            if web_server:
+                web_server.stop()
             raise
+    
+    def start_test_mode(self):
+        """Start only the web server for testing database"""
+        logger.info("🧪 Starting test mode - web interface only")
+        web_server = WebServer()
+        web_server.start()
+        logger.info("🌐 Web interface available at http://127.0.0.1:8000")
+        logger.info("📊 Browse your existing database content")
+        logger.info("⏰ Press Ctrl+C to stop.")
+        
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("\n⏹️ Test mode stopped by user")
+            web_server.stop()
 
 def parse_date(date_str: str) -> date:
     """Parse a date string into a date object."""
@@ -217,6 +245,8 @@ async def main():
                        help='Run once for yesterday\'s date')
     parser.add_argument('--today', action='store_true',
                        help='Run once for today\'s date')
+    parser.add_argument('--test', action='store_true',
+                       help='Test mode: only start web interface (no scheduler)')
     
     # Scraper options (headless is always forced in orchestrator)
     parser.add_argument('--no-covers', action='store_true',
@@ -236,13 +266,15 @@ async def main():
         return 1
     
     # Determine execution mode
-    manual_modes = [args.date, args.start_date and args.end_date, args.yesterday, args.today]
+    manual_modes = [args.date, args.start_date and args.end_date, args.yesterday, args.today, args.test]
     if sum(bool(mode) for mode in manual_modes) > 1:
         print("❌ Please specify only one execution mode")
         return 1
     
     # Determine target date(s) and mode
-    if args.start_date and args.end_date:
+    if args.test:
+        mode = "test"
+    elif args.start_date and args.end_date:
         if args.start_date > args.end_date:
             print("❌ Start date must be before or equal to end date")
             return 1
@@ -268,8 +300,10 @@ async def main():
     )
     
     if args.dry_run:
-        if mode == "scheduler":
-            print(f"🔍 DRY RUN: Would start scheduler to run daily at {args.time}")
+        if mode == "test":
+            print(f"🔍 DRY RUN: Would start web interface only (test mode)")
+        elif mode == "scheduler":
+            print(f"🔍 DRY RUN: Would start scheduler to run daily at {args.time} + web interface")
         elif mode == "single":
             print(f"🔍 DRY RUN: Would process {target_dates}")
         else:
@@ -277,9 +311,13 @@ async def main():
         return 0
     
     try:
-        if mode == "scheduler":
-            # Start continuous scheduler
-            orchestrator.start_scheduler()
+        if mode == "test":
+            # Start only web server for testing
+            orchestrator.start_test_mode()
+            return 0
+        elif mode == "scheduler":
+            # Start continuous scheduler with web server
+            orchestrator.start_scheduler(with_web_server=True)
             return 0
         elif mode == "single":
             result = orchestrator.run_daily_update(target_dates)

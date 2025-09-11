@@ -1,20 +1,17 @@
-# Metal Archives Album Scraper
+# Metal Albums Database
 
-A robust Python script to scrape album and band information from Metal Archives for a specific release date using Playwright for improved reliability.
+A complete system for scraping, storing, and browsing metal album releases from Metal Archives.
 
-## Features
+## 🎯 Features
 
-- 🎯 **Smart Date Filtering**: Search for albums released on a specific date with optimized performance
-- 📀 **Complete Album Data**: Extract detailed album information including tracklists and metadata
-- 🎨 **Automatic Cover Downloads**: Download album cover art to local storage
-- 🎵 **Bandcamp Integration**: Extract Bandcamp links from band pages for music discovery
-- 🏷️ **Rich Metadata**: Extract comprehensive information (genre, label, format, catalog ID, etc.)
-- 🤖 **Anti-Detection**: Human-like browsing patterns with rate limiting and jitter
-- ⚡ **High Performance**: Async/await with optimized filtering (only enriches matching albums)
-- 🛡️ **Robust Error Handling**: Retry logic with exponential backoff
-- 📊 **Data Validation**: Structured data models with Pydantic validation
+- **Automated Scraping**: Daily scraper with headless browser automation
+- **Database Storage**: SQLite database with proper indexing and relationships  
+- **REST API**: FastAPI backend with search, filtering, and statistics
+- **Web Interface**: React + Material UI frontend (in development)
+- **Scheduler**: Built-in Python scheduler (no cron needed)
+- **Cover Art**: Automatic album cover downloading
 
-## Installation
+## 🚀 Quick Start
 
 1. Clone this repository
 2. Install the required dependencies:

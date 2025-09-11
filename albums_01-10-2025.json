@@ -1,5 +1,62 @@
 [
   {
+    "band_name": "Blood and Brutality",
+    "band_id": "3540332076",
+    "band_url": "https://www.metal-archives.com/bands/Blood_and_Brutality/3540332076",
+    "album_name": "Wrath Upon",
+    "album_id": "1366051",
+    "album_url": "https://www.metal-archives.com/albums/Blood_and_Brutality/Wrath_Upon/1366051",
+    "release_date": "2025-10-01",
+    "release_date_raw": "October 1st, 2025 <!-- 2025-10-01 -->",
+    "type": "EP",
+    "cover_art": "https://www.metal-archives.com/images/1/3/6/6/1366051.jpg?5530",
+    "cover_path": "covers/1366051.jpg",
+    "bandcamp_url": "http://bloodandbrutality.bandcamp.com/",
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "Wrath Upon Thee",
+        "length": "02:12"
+      },
+      {
+        "number": "2",
+        "name": "Chaos to Silence",
+        "length": "03:12"
+      },
+      {
+        "number": "3",
+        "name": "March Towards Destiny",
+        "length": "01:31"
+      },
+      {
+        "number": "4",
+        "name": "Never Surrender",
+        "length": "01:49"
+      },
+      {
+        "number": "5",
+        "name": "Fuck You",
+        "length": "01:00"
+      },
+      {
+        "number": "6",
+        "name": "Life is Pain",
+        "length": "04:37"
+      }
+    ],
+    "details": {
+      "type_": "EP",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
+    "country_of_origin": "United States",
+    "location": "Birmingham, Alabama",
+    "genre": "Death/Thrash Metal",
+    "themes": "Brutality",
+    "current_label": "Blood and Brutality Records",
+    "years_active": "2008-present"
+  },
+  {
     "band_name": "De Profundis",
     "band_id": "103709",
     "band_url": "https://www.metal-archives.com/bands/De_Profundis/103709",
@@ -12,8 +69,33 @@
     "cover_art": "https://www.metal-archives.com/images/1/3/6/0/1360524.jpg?2654",
     "cover_path": "covers/1360524.jpg",
     "bandcamp_url": "http://deprofundis.bandcamp.com/",
-    "tracklist": [],
-    "details": {},
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "I: Corruption",
+        "length": "04:11"
+      },
+      {
+        "number": "2",
+        "name": "II: Deception",
+        "length": "03:45"
+      },
+      {
+        "number": "3",
+        "name": "III: Indoctrination",
+        "length": "04:27"
+      },
+      {
+        "number": "4",
+        "name": "IV: Subtraction (Sepultura cover)",
+        "length": "04:34"
+      }
+    ],
+    "details": {
+      "type_": "EP",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
     "country_of_origin": "United Kingdom",
     "location": "London, England",
     "genre": "Doom/Death Metal (early); Progressive Death/Black Metal (mid); Death Metal (later)",
@@ -34,8 +116,68 @@
     "cover_art": "https://www.metal-archives.com/images/1/3/5/4/1354139.jpg?2440",
     "cover_path": "covers/1354139.jpg",
     "bandcamp_url": "http://dissona.bandcamp.com/",
-    "tracklist": [],
-    "details": {},
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "Receptor",
+        "length": "05:47"
+      },
+      {
+        "number": "2",
+        "name": "Suffuse",
+        "length": ""
+      },
+      {
+        "number": "3",
+        "name": "Becoming Home",
+        "length": ""
+      },
+      {
+        "number": "4",
+        "name": "Incisor",
+        "length": ""
+      },
+      {
+        "number": "5",
+        "name": "Haimatox",
+        "length": ""
+      },
+      {
+        "number": "6",
+        "name": "It Will Drown",
+        "length": ""
+      },
+      {
+        "number": "7",
+        "name": "Chimeric",
+        "length": ""
+      },
+      {
+        "number": "8",
+        "name": "Weaponized",
+        "length": ""
+      },
+      {
+        "number": "9",
+        "name": "Red Mist",
+        "length": ""
+      },
+      {
+        "number": "10",
+        "name": "Shadow Consummation",
+        "length": ""
+      },
+      {
+        "number": "11",
+        "name": "In Dawn's Wake",
+        "length": ""
+      }
+    ],
+    "details": {
+      "type_": "Full-length",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
     "country_of_origin": "United States",
     "location": "New Lenox / Mokena / Chicago, Illinois",
     "genre": "Progressive Metal",
@@ -56,13 +198,399 @@
     "cover_art": "https://www.metal-archives.com/images/1/3/5/7/1357250.jpg?3648",
     "cover_path": "covers/1357250.jpg",
     "bandcamp_url": "http://gravewurm.bandcamp.com/",
-    "tracklist": [],
-    "details": {},
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "Black Sentry",
+        "length": "03:03"
+      },
+      {
+        "number": "2",
+        "name": "To Rule the Night",
+        "length": ""
+      },
+      {
+        "number": "3",
+        "name": "Fog of War",
+        "length": ""
+      },
+      {
+        "number": "4",
+        "name": "Show Me the Way",
+        "length": ""
+      },
+      {
+        "number": "5",
+        "name": "From Their Dark Lair",
+        "length": ""
+      },
+      {
+        "number": "6",
+        "name": "Spitits of the Night Winds",
+        "length": ""
+      },
+      {
+        "number": "7",
+        "name": "Black is the Blood of My Soul",
+        "length": ""
+      },
+      {
+        "number": "8",
+        "name": "Serpent Rider of the Night",
+        "length": ""
+      }
+    ],
+    "details": {
+      "type_": "Full-length",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A",
+      "version_desc__": "Bandcamp"
+    },
     "country_of_origin": "United States",
     "location": "Clarion, Pennsylvania (early); Oakton, Virginia (mid); Lakewood, Ohio (later)",
     "genre": "Black/Death Metal",
     "themes": "Death, Darkness, War, Evil, Necromancy, Sorcery, Divine genocide, Hell",
     "current_label": "Unsigned/independent",
     "years_active": "1990-1992\t\t        \t\t\t\t(as Dominion),\t\t        \t\t\n\t\t        \t\t\t1992\t\t        \t\t\t\t(as Born from Fear),\t\t        \t\t\n\t\t        \t\t\t1992-present"
+  },
+  {
+    "band_name": "Melt4",
+    "band_id": "3540453928",
+    "band_url": "https://www.metal-archives.com/bands/Melt4/3540453928",
+    "album_name": "Meltpolis",
+    "album_id": "1367171",
+    "album_url": "https://www.metal-archives.com/albums/Melt4/Meltpolis/1367171",
+    "release_date": "2025-10-01",
+    "release_date_raw": "October 1st, 2025 <!-- 2025-10-01 -->",
+    "type": "Full-length",
+    "cover_art": "https://www.metal-archives.com/images/1/3/6/7/1367171.jpg?3734",
+    "cover_path": "covers/1367171.jpg",
+    "bandcamp_url": null,
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "March of the Empire",
+        "length": ""
+      },
+      {
+        "number": "2",
+        "name": "World War Empire (Album Version)",
+        "length": ""
+      },
+      {
+        "number": "3",
+        "name": "Champions (We are the One)",
+        "length": ""
+      },
+      {
+        "number": "4",
+        "name": "Time",
+        "length": ""
+      },
+      {
+        "number": "5",
+        "name": "Meltpolis",
+        "length": ""
+      },
+      {
+        "number": "6",
+        "name": "Destroyer (feat. サイプレス上野とロベルト吉野)",
+        "length": ""
+      },
+      {
+        "number": "7",
+        "name": "Fire 2025 (feat. 屍忌蛇)",
+        "length": ""
+      },
+      {
+        "number": "8",
+        "name": "Drop Star",
+        "length": ""
+      },
+      {
+        "number": "9",
+        "name": "Gravity (Album Version)",
+        "length": ""
+      },
+      {
+        "number": "10",
+        "name": "Silence",
+        "length": ""
+      }
+    ],
+    "details": {
+      "type_": "Full-length",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
+    "country_of_origin": "Japan",
+    "location": "Tokyo",
+    "genre": "Heavy/Thrash Metal",
+    "themes": "N/A",
+    "current_label": "Unsigned/independent",
+    "years_active": "N/A"
+  },
+  {
+    "band_name": "Mental Phlegm",
+    "band_id": "3540497703",
+    "band_url": "https://www.metal-archives.com/bands/Mental_Phlegm/3540497703",
+    "album_name": "Enjoy Yourself (Become your own Buffet)",
+    "album_id": "1367534",
+    "album_url": "https://www.metal-archives.com/albums/Mental_Phlegm/Enjoy_Yourself_%28Become_your_own_Buffet%29/1367534",
+    "release_date": "2025-10-01",
+    "release_date_raw": "October 1st, 2025 <!-- 2025-10-01 -->",
+    "type": "EP",
+    "cover_art": "https://www.metal-archives.com/images/1/3/6/7/1367534.jpg?2412",
+    "cover_path": "covers/1367534.jpg",
+    "bandcamp_url": "https://mentalphlegm.bandcamp.com/",
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "The soup of the Day",
+        "length": "03:18"
+      },
+      {
+        "number": "2",
+        "name": "-",
+        "length": ""
+      }
+    ],
+    "details": {
+      "type_": "EP",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
+    "country_of_origin": "Germany",
+    "location": "Ulm, Baden-Württemberg",
+    "genre": "Grindcore/Death Metal",
+    "themes": "Parasitism, Violence",
+    "current_label": "Slime Inhaler Records",
+    "years_active": "2021-present"
+  },
+  {
+    "band_name": "Nishaiar",
+    "band_id": "3540424021",
+    "band_url": "https://www.metal-archives.com/bands/Nishaiar/3540424021",
+    "album_name": "Enkbera",
+    "album_id": "1365767",
+    "album_url": "https://www.metal-archives.com/albums/Nishaiar/Enkbera/1365767",
+    "release_date": "2025-10-01",
+    "release_date_raw": "October 1st, 2025 <!-- 2025-10-01 -->",
+    "type": "Full-length",
+    "cover_art": "https://www.metal-archives.com/images/1/3/6/5/1365767.jpg?1039",
+    "cover_path": "covers/1365767.jpg",
+    "bandcamp_url": "https://nishaiar.bandcamp.com/",
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "Cew",
+        "length": ""
+      },
+      {
+        "number": "2",
+        "name": "Deh",
+        "length": "04:22"
+      },
+      {
+        "number": "3",
+        "name": "Sadre",
+        "length": ""
+      },
+      {
+        "number": "4",
+        "name": "Du",
+        "length": ""
+      },
+      {
+        "number": "5",
+        "name": "Watwe",
+        "length": "04:12"
+      },
+      {
+        "number": "6",
+        "name": "Ne",
+        "length": ""
+      },
+      {
+        "number": "7",
+        "name": "Lun G",
+        "length": ""
+      },
+      {
+        "number": "8",
+        "name": "Awhe",
+        "length": ""
+      },
+      {
+        "number": "9",
+        "name": "Tdebe",
+        "length": ""
+      },
+      {
+        "number": "10",
+        "name": "Awwa",
+        "length": ""
+      },
+      {
+        "number": "11",
+        "name": "Ecne",
+        "length": ""
+      },
+      {
+        "number": "12",
+        "name": "Eteal",
+        "length": "02:43"
+      }
+    ],
+    "details": {
+      "type_": "Full-length",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
+    "country_of_origin": "Ethiopia",
+    "location": "Gondar, Amhara",
+    "genre": "Atmospheric Black Metal/Post-Rock",
+    "themes": "N/A",
+    "current_label": "Unsigned/independent",
+    "years_active": "2016-present"
+  },
+  {
+    "band_name": "Slave Keeper",
+    "band_id": "3540512918",
+    "band_url": "https://www.metal-archives.com/bands/Slave_Keeper/3540512918",
+    "album_name": "Podwójna Gra",
+    "album_id": "1367295",
+    "album_url": "https://www.metal-archives.com/albums/Slave_Keeper/Podw%C3%B3jna_Gra/1367295",
+    "release_date": "2025-10-01",
+    "release_date_raw": "October 1st, 2025 <!-- 2025-10-01 -->",
+    "type": "Full-length",
+    "cover_art": "https://www.metal-archives.com/images/1/3/6/7/1367295.jpg?3258",
+    "cover_path": "covers/1367295.jpg",
+    "bandcamp_url": "https://slavekeeper.bandcamp.com/",
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "Exilium",
+        "length": ""
+      },
+      {
+        "number": "2",
+        "name": "Złudzenie",
+        "length": ""
+      },
+      {
+        "number": "3",
+        "name": "Beton i szkło",
+        "length": ""
+      },
+      {
+        "number": "4",
+        "name": "Jak Feniks",
+        "length": "06:19"
+      },
+      {
+        "number": "5",
+        "name": "Przeciw sobie",
+        "length": ""
+      },
+      {
+        "number": "6",
+        "name": "Cichy ból",
+        "length": ""
+      },
+      {
+        "number": "7",
+        "name": "Święty grzesznik",
+        "length": ""
+      },
+      {
+        "number": "8",
+        "name": "Czekam światła dnia",
+        "length": ""
+      },
+      {
+        "number": "9",
+        "name": "Biegnę",
+        "length": ""
+      },
+      {
+        "number": "10",
+        "name": "Ostatni walc",
+        "length": ""
+      }
+    ],
+    "details": {
+      "type_": "Full-length",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
+    "country_of_origin": "Poland",
+    "location": "Lublin, Lublin",
+    "genre": "Melodic Heavy Metal/Hard Rock",
+    "themes": "N/A",
+    "current_label": "Unsigned/independent",
+    "years_active": "2014-present"
+  },
+  {
+    "band_name": "Voragoth",
+    "band_id": "3540555715",
+    "band_url": "https://www.metal-archives.com/bands/Voragoth/3540555715",
+    "album_name": "Storm Obey No Masters!",
+    "album_id": "1367247",
+    "album_url": "https://www.metal-archives.com/albums/Voragoth/Storm_Obey_No_Masters%21/1367247",
+    "release_date": "2025-10-01",
+    "release_date_raw": "October 1st, 2025 <!-- 2025-10-01 -->",
+    "type": "Full-length",
+    "cover_art": "https://www.metal-archives.com/images/1/3/6/7/1367247.jpeg?2449",
+    "cover_path": "covers/1367247.jpg",
+    "bandcamp_url": "https://voragoth.bandcamp.com/music",
+    "tracklist": [
+      {
+        "number": "1",
+        "name": "Chronicles Begin",
+        "length": ""
+      },
+      {
+        "number": "2",
+        "name": "In Chaos We Reign",
+        "length": ""
+      },
+      {
+        "number": "3",
+        "name": "Storm Obey No Masters!",
+        "length": "04:24"
+      },
+      {
+        "number": "4",
+        "name": "The Last Testament",
+        "length": ""
+      },
+      {
+        "number": "5",
+        "name": "Renegades",
+        "length": "07:36"
+      },
+      {
+        "number": "6",
+        "name": "Darkness Shrouds...",
+        "length": ""
+      },
+      {
+        "number": "7",
+        "name": "The Last Day of Light",
+        "length": ""
+      }
+    ],
+    "details": {
+      "type_": "Full-length",
+      "release_date_": "October 1st, 2025",
+      "catalog_id_": "N/A"
+    },
+    "country_of_origin": "Croatia",
+    "location": "Zagreb",
+    "genre": "Melodic Death Metal",
+    "themes": "Nature, Fantasy",
+    "current_label": "Unsigned/independent",
+    "years_active": "2023\t\t        \t\t\t\t(as Stormfront),\t\t        \t\t\n\t\t        \t\t\t2023-present"
   }
 ]
