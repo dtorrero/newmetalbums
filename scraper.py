@@ -871,6 +871,7 @@ async def main():
     parser.add_argument('--output', '-o', type=str, default=None, help='Output JSON file (default: albums_DD-MM-YYYY.json)')
     parser.add_argument('--headless', action='store_true', help='Run in headless mode (default: False)')
     parser.add_argument('--download-covers', action='store_true', help='Download album covers')
+    parser.add_argument('--add-to-db', action='store_true', help='Add scraped data to database after creating JSON')
     args = parser.parse_args()
     
     # Generate default filename if no output specified
@@ -904,6 +905,27 @@ async def main():
             if args.download_covers:
                 cover_count = sum(1 for album in albums if album.get('cover_path'))
                 print(f"🖼️  Downloaded {cover_count} album covers")
+            
+            # Add to database if requested
+            if args.add_to_db:
+                try:
+                    from db_manager import AlbumsDatabase
+                    db = AlbumsDatabase()
+                    db.connect()
+                    db.create_tables()
+                    
+                    successful_inserts = 0
+                    for album in albums:
+                        if db.insert_album(album):
+                            successful_inserts += 1
+                    
+                    db.close()
+                    print(f"🗄️  Added {successful_inserts}/{len(albums)} albums to database")
+                    
+                except Exception as e:
+                    logger.error(f"Database insertion failed: {str(e)}")
+                    print(f"❌ Database insertion failed: {str(e)}")
+                    # Don't fail the whole operation - JSON is already saved
             
         except Exception as e:
             logger.error(f"Error: {str(e)}")
