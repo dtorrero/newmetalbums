@@ -58,6 +58,7 @@ scraping_status = {
 class ScrapeRequest(BaseModel):
     date: str  # Format: DD-MM-YYYY
     download_covers: bool = True
+    force_rescrape: bool = False
     
 class DeleteDateRequest(BaseModel):
     date: str  # Format: DD-MM-YYYY or YYYY-MM-DD
@@ -332,11 +333,15 @@ async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTas
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use DD-MM-YYYY")
     
-    # Check if data already exists for this date
-    if db.check_date_exists(request.date):
+    # Check if data already exists for this date (convert to database format)
+    db_date = datetime.strptime(request.date, "%d-%m-%Y").strftime("%Y-%m-%d")
+    existing_data = db.check_date_exists(db_date)
+    if existing_data and not getattr(request, 'force_rescrape', False):
+        # Get count of existing albums for this date
+        existing_count = db.get_albums_count_by_date(db_date)
         raise HTTPException(
             status_code=409, 
-            detail=f"Data already exists for {request.date}. Delete existing data first if you want to re-scrape."
+            detail=f"Data already exists for {request.date} ({existing_count} albums). Use force_rescrape=true to overwrite existing data."
         )
     
     # Start background scraping task

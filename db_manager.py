@@ -297,6 +297,12 @@ class AlbumsDatabase:
         cursor = self.connection.cursor()
         cursor.execute("SELECT COUNT(*) as count FROM albums WHERE release_date = ?", (release_date,))
         return cursor.fetchone()['count'] > 0
+    
+    def get_albums_count_by_date(self, release_date: str) -> int:
+        """Get count of albums for a specific date"""
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM albums WHERE release_date = ?", (release_date,))
+        return cursor.fetchone()['count']
 
 def ingest_json_files(db: AlbumsDatabase, json_pattern: str = "data/albums_*.json"):
     """Ingest all JSON files matching pattern into database"""

@@ -74,6 +74,7 @@ const AdminPanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'success' | 'error' | 'info' });
   const [deleteDialog, setDeleteDialog] = useState({ open: false, date: '', type: 'single' as 'single' | 'range' });
+  const [forceDialog, setForceDialog] = useState({ open: false, message: '', albumCount: 0 });
 
   const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
 
@@ -102,7 +103,7 @@ const AdminPanel: React.FC = () => {
     }
   };
 
-  const handleScrape = async () => {
+  const handleScrape = async (forceRescrape = false) => {
     setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/admin/scrape`, {
@@ -113,6 +114,7 @@ const AdminPanel: React.FC = () => {
         body: JSON.stringify({
           date: scrapeDate,
           download_covers: downloadCovers,
+          force_rescrape: forceRescrape,
         }),
       });
 
@@ -120,6 +122,20 @@ const AdminPanel: React.FC = () => {
         const data = await response.json();
         showSnackbar(data.message, 'success');
         fetchScrapeStatus();
+      } else if (response.status === 409 && !forceRescrape) {
+        // Handle existing data conflict
+        const error = await response.json();
+        const message = error.detail || 'Data already exists';
+        
+        // Extract album count from message (format: "Data already exists for DD-MM-YYYY (X albums)...")
+        const countMatch = message.match(/\((\d+) albums?\)/);
+        const albumCount = countMatch ? parseInt(countMatch[1]) : 0;
+        
+        setForceDialog({
+          open: true,
+          message: message,
+          albumCount: albumCount
+        });
       } else {
         const error = await response.json();
         showSnackbar(error.detail || 'Scraping failed', 'error');
@@ -128,6 +144,11 @@ const AdminPanel: React.FC = () => {
       showSnackbar('Network error occurred', 'error');
     }
     setLoading(false);
+  };
+
+  const handleForceRescrape = () => {
+    setForceDialog({ open: false, message: '', albumCount: 0 });
+    handleScrape(true);
   };
 
   const handleDeleteDate = async (date: string) => {
@@ -233,7 +254,7 @@ const AdminPanel: React.FC = () => {
                 fullWidth
                 variant="contained"
                 startIcon={<PlayArrow />}
-                onClick={handleScrape}
+                onClick={() => handleScrape()}
                 disabled={loading || scrapeStatus?.is_running}
                 sx={{ mb: 2 }}
               >
@@ -402,6 +423,34 @@ const AdminPanel: React.FC = () => {
             onClick={() => handleDeleteDate(deleteDialog.date)}
           >
             Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Force Rescrape Confirmation Dialog */}
+      <Dialog open={forceDialog.open} onClose={() => setForceDialog({ open: false, message: '', albumCount: 0 })}>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Warning color="warning" />
+          Data Already Exists
+        </DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 2 }}>
+            Data already exists for {scrapeDate} with {forceDialog.albumCount} albums.
+          </Typography>
+          <Typography>
+            Do you want to overwrite the existing data? This will replace all current albums for this date.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setForceDialog({ open: false, message: '', albumCount: 0 })}>
+            Cancel
+          </Button>
+          <Button 
+            color="warning" 
+            variant="contained"
+            onClick={handleForceRescrape}
+          >
+            Overwrite Data
           </Button>
         </DialogActions>
       </Dialog>
