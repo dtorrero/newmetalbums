@@ -181,7 +181,8 @@ const AdminPanel: React.FC = () => {
 
   const formatDate = (dateString: string) => {
     try {
-      const [day, month, year] = dateString.split('-');
+      // Database stores dates in YYYY-MM-DD format
+      const [year, month, day] = dateString.split('-');
       return new Date(parseInt(year), parseInt(month) - 1, parseInt(day)).toLocaleDateString();
     } catch {
       return dateString;
