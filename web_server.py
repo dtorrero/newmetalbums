@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 from db_manager import AlbumsDatabase, ingest_json_files
 from scraper import MetalArchivesScraper
+from models import Album
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -244,7 +245,16 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         scraping_status["status_message"] = f"Scraping albums for {scrape_date}..."
         
         # Run the scraper
-        albums = await scraper.scrape_albums_by_date(scrape_date, download_covers=download_covers)
+        date_obj = datetime.strptime(scrape_date, "%d-%m-%Y").date()
+        albums_data = await scraper.search_albums_by_date(date_obj)
+        
+        # Convert to Album objects if needed
+        albums = []
+        for album_data in albums_data:
+            album = Album.from_scraped_data(album_data)
+            if download_covers:
+                await scraper.download_cover(album_data)
+            albums.append(album)
         
         scraping_status.update({
             "progress": len(albums),
@@ -252,10 +262,37 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             "status_message": f"Scraped {len(albums)} albums, saving to database..."
         })
         
-        # Save to JSON file
+        # Save to JSON file - flatten band data for database compatibility
         json_filename = f"data/albums_{scrape_date}.json"
+        flattened_albums = []
+        for album in albums:
+            album_dict = album.model_dump(by_alias=True)
+            
+            # Flatten band data to top level
+            if 'band' in album_dict:
+                band_data = album_dict.pop('band')
+                album_dict.update({
+                    'band_name': band_data.get('name', ''),
+                    'band_url': band_data.get('url', ''),
+                    'band_id': band_data.get('id', ''),
+                    'country_of_origin': band_data.get('country_of_origin', ''),
+                    'location': band_data.get('location', ''),
+                    'genre': band_data.get('genre', ''),
+                    'themes': band_data.get('themes', ''),
+                    'current_label': band_data.get('current_label', ''),
+                    'years_active': band_data.get('years_active', '')
+                })
+            
+            # Ensure release_date_raw is included (may be missing from Album model)
+            if 'release_date_raw' not in album_dict:
+                # Extract from details if available
+                details = album_dict.get('details', {})
+                album_dict['release_date_raw'] = details.get('release_date_', '')
+            
+            flattened_albums.append(album_dict)
+        
         with open(json_filename, 'w', encoding='utf-8') as f:
-            json.dump([album.to_dict() for album in albums], f, indent=2, ensure_ascii=False)
+            json.dump(flattened_albums, f, indent=2, ensure_ascii=False)
         
         # Ingest into database
         ingest_json_files(db, json_filename)
@@ -266,7 +303,7 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             "end_time": datetime.now().isoformat()
         })
         
-        await scraper.cleanup()
+        await scraper.close()
         
     except Exception as e:
         logger.error(f"Scraping failed: {e}")
@@ -279,7 +316,7 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         
         # Cleanup scraper if it was initialized
         try:
-            await scraper.cleanup()
+            await scraper.close()
         except:
             pass
 
@@ -319,18 +356,19 @@ async def get_scrape_status():
 @app.delete("/api/admin/data/{date}")
 async def delete_data_by_date(date: str):
     """Delete all data for a specific date"""
+    search_date = None
+    
     try:
-        # Try both date formats
+        # Try YYYY-MM-DD format first (database storage format)
         try:
-            # Try DD-MM-YYYY format first
-            parsed_date = datetime.strptime(date, "%d-%m-%Y")
-            search_date = date
-        except ValueError:
-            # Try YYYY-MM-DD format
             parsed_date = datetime.strptime(date, "%Y-%m-%d")
-            search_date = parsed_date.strftime("%d-%m-%Y")
+            search_date = date  # Use as-is since it matches database format
+        except ValueError:
+            # Try DD-MM-YYYY format and convert to database format
+            parsed_date = datetime.strptime(date, "%d-%m-%Y")
+            search_date = parsed_date.strftime("%Y-%m-%d")  # Convert to database format
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use DD-MM-YYYY or YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD or DD-MM-YYYY")
     
     deleted_count = db.delete_albums_by_date(search_date)
     

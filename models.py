@@ -72,6 +72,7 @@ class Album(BaseModel):
             type=data.get('type', ''),
             cover_art=data.get('cover_art'),
             cover_path=data.get('cover_path'),
+            bandcamp_url=data.get('bandcamp_url'),
             tracklist=tracks,
             details=data.get('details', {})
         )
