@@ -134,7 +134,9 @@ const AlbumDisplay: React.FC = () => {
           Back to Dates
         </Button>
 
-        <Typography variant="h4" component="h1" gutterBottom>
+        <Typography variant="h4" component="h1" gutterBottom sx={{
+          fontSize: { xs: '1.75rem', md: '2.125rem' }
+        }}>
           🤘 Albums Released on {formatDate(date || '')}
         </Typography>
         
@@ -149,13 +151,23 @@ const AlbumDisplay: React.FC = () => {
         ) : (
           <Box display="flex" flexDirection="column" gap={4}>
             {albums.map((album) => (
-              <Card key={album.id} elevation={3} sx={{ display: 'flex', minHeight: 340 }}>
+              <Card key={album.id} elevation={3} sx={{ 
+                display: 'flex', 
+                minHeight: 340,
+                flexDirection: { xs: 'column', md: 'row' }
+              }}>
                   {/* Album Cover */}
-                  <Box sx={{ width: 320, flexShrink: 0, position: 'relative' }}>
+                  <Box sx={{ 
+                    width: { xs: '100%', md: 320 }, 
+                    flexShrink: 0, 
+                    position: 'relative',
+                    display: 'flex',
+                    justifyContent: 'center'
+                  }}>
                     <Box
                       sx={{
-                        width: 320,
-                        height: 320,
+                        width: { xs: 280, md: 320 },
+                        height: { xs: 280, md: 320 },
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -200,12 +212,16 @@ const AlbumDisplay: React.FC = () => {
 
                   {/* Album Details */}
                   <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <Box>
-                      <Typography variant="h5" component="h2" gutterBottom>
+                    <Box sx={{ p: { xs: 2, md: 0 } }}>
+                      <Typography variant="h5" component="h2" gutterBottom sx={{
+                        fontSize: { xs: '1.25rem', md: '1.5rem' }
+                      }}>
                         {album.album_name}
                       </Typography>
                       
-                      <Typography variant="h6" color="primary" gutterBottom>
+                      <Typography variant="h6" color="primary" gutterBottom sx={{
+                        fontSize: { xs: '1rem', md: '1.25rem' }
+                      }}>
                         by {album.band_name}
                       </Typography>
 
@@ -287,7 +303,10 @@ const AlbumDisplay: React.FC = () => {
                       )}
 
                       {/* Links */}
-                      <Box display="flex" gap={1} flexWrap="wrap">
+                      <Box display="flex" gap={1} flexWrap="wrap" sx={{
+                        justifyContent: { xs: 'center', md: 'flex-start' },
+                        pb: { xs: 2, md: 0 }
+                      }}>
                         {album.album_url && (
                           <Button
                             size="small"
@@ -329,16 +348,25 @@ const AlbumDisplay: React.FC = () => {
             '& .MuiDialog-paper': {
               backgroundColor: 'rgba(0, 0, 0, 0.9)',
               boxShadow: 'none',
+              margin: { xs: 1, md: 2 },
+              maxHeight: { xs: '95vh', md: '90vh' }
             }
           }}
         >
-          <DialogContent sx={{ p: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <DialogContent sx={{ 
+            p: { xs: 1, md: 0 }, 
+            position: 'relative', 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center',
+            minHeight: { xs: '50vh', md: 'auto' }
+          }}>
             <IconButton
               onClick={() => setImageDialog({ open: false, imageUrl: '', albumName: '' })}
               sx={{
                 position: 'absolute',
-                top: 16,
-                right: 16,
+                top: { xs: 8, md: 16 },
+                right: { xs: 8, md: 16 },
                 color: 'white',
                 backgroundColor: 'rgba(0, 0, 0, 0.5)',
                 zIndex: 1,
@@ -355,9 +383,10 @@ const AlbumDisplay: React.FC = () => {
               alt={`${imageDialog.albumName} cover - full size`}
               sx={{
                 maxWidth: '100%',
-                maxHeight: '90vh',
+                maxHeight: { xs: '85vh', md: '90vh' },
                 objectFit: 'contain',
-                display: 'block'
+                display: 'block',
+                cursor: 'pointer'
               }}
               onClick={() => setImageDialog({ open: false, imageUrl: '', albumName: '' })}
             />
