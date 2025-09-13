@@ -24,7 +24,7 @@ class DevServer:
         print("🚀 Starting FastAPI backend on http://127.0.0.1:8000")
         try:
             self.backend_process = subprocess.Popen(
-                [sys.executable, "daily_orchestrator.py", "--test"],
+                [sys.executable, "web_server.py"],
                 cwd=self.project_root,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

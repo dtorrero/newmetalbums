@@ -1,9 +1,8 @@
 env
 notes
-#*.json
 __pycache__
 covers
-
+data/
 # Frontend React app
 frontend/node_modules/
 frontend/build/

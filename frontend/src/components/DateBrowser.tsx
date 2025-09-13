@@ -9,9 +9,11 @@ import {
   CircularProgress,
   Alert,
   Container,
+  Button,
+  Fab,
 } from '@mui/material';
-import { CalendarToday, Album } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { CalendarToday, Album, Settings } from '@mui/icons-material';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { DateInfo } from '../types';
 
@@ -96,9 +98,20 @@ const DateBrowser: React.FC = () => {
   return (
     <Container maxWidth="lg">
       <Box py={4}>
-        <Typography variant="h3" component="h1" gutterBottom align="center">
-          🤘 Metal Albums Database
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h3" component="h1">
+            🤘 Metal Albums Database
+          </Typography>
+          <Button
+            component={Link}
+            to="/admin"
+            startIcon={<Settings />}
+            variant="outlined"
+            color="secondary"
+          >
+            Admin
+          </Button>
+        </Box>
         <Typography variant="h6" color="text.secondary" align="center" sx={{ mb: 4 }}>
           Browse new metal album releases by date
         </Typography>

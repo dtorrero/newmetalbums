@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AlbumsDatabase:
-    def __init__(self, db_path: str = "albums.db"):
+    def __init__(self, db_path: str = "data/albums.db"):
         self.db_path = db_path
         self.connection = None
     
@@ -204,8 +204,101 @@ class AlbumsDatabase:
                     album['details'] = {}
         
         return albums
+    
+    def delete_albums_by_date(self, release_date: str) -> int:
+        """Delete all albums for a specific release date"""
+        cursor = self.connection.cursor()
+        
+        # First get album IDs to delete tracks
+        cursor.execute("SELECT album_id FROM albums WHERE release_date = ?", (release_date,))
+        album_ids = [row['album_id'] for row in cursor.fetchall()]
+        
+        if not album_ids:
+            return 0
+        
+        # Delete tracks for these albums
+        placeholders = ','.join(['?' for _ in album_ids])
+        cursor.execute(f"DELETE FROM tracks WHERE album_id IN ({placeholders})", album_ids)
+        tracks_deleted = cursor.rowcount
+        
+        # Delete albums
+        cursor.execute("DELETE FROM albums WHERE release_date = ?", (release_date,))
+        albums_deleted = cursor.rowcount
+        
+        self.connection.commit()
+        logger.info(f"Deleted {albums_deleted} albums and {tracks_deleted} tracks for date {release_date}")
+        return albums_deleted
+    
+    def delete_albums_by_date_range(self, start_date: str, end_date: str) -> int:
+        """Delete all albums within a date range (inclusive)"""
+        cursor = self.connection.cursor()
+        
+        # First get album IDs to delete tracks
+        cursor.execute("""
+            SELECT album_id FROM albums 
+            WHERE release_date >= ? AND release_date <= ?
+        """, (start_date, end_date))
+        album_ids = [row['album_id'] for row in cursor.fetchall()]
+        
+        if not album_ids:
+            return 0
+        
+        # Delete tracks for these albums
+        placeholders = ','.join(['?' for _ in album_ids])
+        cursor.execute(f"DELETE FROM tracks WHERE album_id IN ({placeholders})", album_ids)
+        tracks_deleted = cursor.rowcount
+        
+        # Delete albums
+        cursor.execute("""
+            DELETE FROM albums 
+            WHERE release_date >= ? AND release_date <= ?
+        """, (start_date, end_date))
+        albums_deleted = cursor.rowcount
+        
+        self.connection.commit()
+        logger.info(f"Deleted {albums_deleted} albums and {tracks_deleted} tracks for date range {start_date} to {end_date}")
+        return albums_deleted
+    
+    def get_data_summary(self) -> Dict[str, Any]:
+        """Get summary of data in database for admin purposes"""
+        cursor = self.connection.cursor()
+        
+        # Total counts
+        cursor.execute("SELECT COUNT(*) as total FROM albums")
+        total_albums = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as total FROM tracks")
+        total_tracks = cursor.fetchone()['total']
+        
+        # Data by date
+        cursor.execute("""
+            SELECT release_date, COUNT(*) as count 
+            FROM albums 
+            WHERE release_date IS NOT NULL AND release_date != ''
+            GROUP BY release_date 
+            ORDER BY release_date DESC
+        """)
+        dates_data = [dict(row) for row in cursor.fetchall()]
+        
+        # Database size (approximate)
+        cursor.execute("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()")
+        db_size = cursor.fetchone()['size']
+        
+        return {
+            "total_albums": total_albums,
+            "total_tracks": total_tracks,
+            "dates_count": len(dates_data),
+            "dates_data": dates_data,
+            "database_size_bytes": db_size
+        }
+    
+    def check_date_exists(self, release_date: str) -> bool:
+        """Check if data exists for a specific date"""
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM albums WHERE release_date = ?", (release_date,))
+        return cursor.fetchone()['count'] > 0
 
-def ingest_json_files(db: AlbumsDatabase, json_pattern: str = "albums_*.json"):
+def ingest_json_files(db: AlbumsDatabase, json_pattern: str = "data/albums_*.json"):
     """Ingest all JSON files matching pattern into database"""
     json_files = glob.glob(json_pattern)
     

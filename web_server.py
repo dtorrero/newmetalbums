@@ -6,15 +6,19 @@ Serves API endpoints and static frontend files
 
 import asyncio
 import threading
-from fastapi import FastAPI, HTTPException, Query
+import json
+from datetime import datetime, date
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
 import uvicorn
 import logging
 from pathlib import Path
-from db_manager import AlbumsDatabase
+from db_manager import AlbumsDatabase, ingest_json_files
+from scraper import MetalArchivesScraper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,6 +40,30 @@ app.add_middleware(
 
 # Global database instance
 db = AlbumsDatabase()
+
+# Global scraping status
+scraping_status = {
+    "is_running": False,
+    "current_date": None,
+    "progress": 0,
+    "total": 0,
+    "status_message": "Idle",
+    "error": None,
+    "start_time": None,
+    "end_time": None
+}
+
+# Pydantic models for admin endpoints
+class ScrapeRequest(BaseModel):
+    date: str  # Format: DD-MM-YYYY
+    download_covers: bool = True
+    
+class DeleteDateRequest(BaseModel):
+    date: str  # Format: DD-MM-YYYY or YYYY-MM-DD
+    
+class DeleteRangeRequest(BaseModel):
+    start_date: str
+    end_date: str
 
 @app.on_event("startup")
 async def startup_event():
@@ -189,6 +217,168 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "message": "Metal Albums API is running"}
 
+# ============================================================================
+# ADMIN ENDPOINTS
+# ============================================================================
+
+async def run_scraper_task(scrape_date: str, download_covers: bool = True):
+    """Background task to run the scraper"""
+    global scraping_status
+    
+    try:
+        scraping_status.update({
+            "is_running": True,
+            "current_date": scrape_date,
+            "progress": 0,
+            "total": 0,
+            "status_message": "Initializing scraper...",
+            "error": None,
+            "start_time": datetime.now().isoformat(),
+            "end_time": None
+        })
+        
+        # Initialize scraper
+        scraper = MetalArchivesScraper(headless=True)
+        await scraper.initialize()
+        
+        scraping_status["status_message"] = f"Scraping albums for {scrape_date}..."
+        
+        # Run the scraper
+        albums = await scraper.scrape_albums_by_date(scrape_date, download_covers=download_covers)
+        
+        scraping_status.update({
+            "progress": len(albums),
+            "total": len(albums),
+            "status_message": f"Scraped {len(albums)} albums, saving to database..."
+        })
+        
+        # Save to JSON file
+        json_filename = f"data/albums_{scrape_date}.json"
+        with open(json_filename, 'w', encoding='utf-8') as f:
+            json.dump([album.to_dict() for album in albums], f, indent=2, ensure_ascii=False)
+        
+        # Ingest into database
+        ingest_json_files(db, json_filename)
+        
+        scraping_status.update({
+            "is_running": False,
+            "status_message": f"Successfully scraped and saved {len(albums)} albums for {scrape_date}",
+            "end_time": datetime.now().isoformat()
+        })
+        
+        await scraper.cleanup()
+        
+    except Exception as e:
+        logger.error(f"Scraping failed: {e}")
+        scraping_status.update({
+            "is_running": False,
+            "error": str(e),
+            "status_message": f"Scraping failed: {str(e)}",
+            "end_time": datetime.now().isoformat()
+        })
+        
+        # Cleanup scraper if it was initialized
+        try:
+            await scraper.cleanup()
+        except:
+            pass
+
+@app.post("/api/admin/scrape")
+async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks):
+    """Trigger manual scraping for a specific date"""
+    if scraping_status["is_running"]:
+        raise HTTPException(status_code=409, detail="Scraping is already in progress")
+    
+    # Validate date format
+    try:
+        datetime.strptime(request.date, "%d-%m-%Y")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use DD-MM-YYYY")
+    
+    # Check if data already exists for this date
+    if db.check_date_exists(request.date):
+        raise HTTPException(
+            status_code=409, 
+            detail=f"Data already exists for {request.date}. Delete existing data first if you want to re-scrape."
+        )
+    
+    # Start background scraping task
+    background_tasks.add_task(run_scraper_task, request.date, request.download_covers)
+    
+    return {
+        "message": f"Scraping started for {request.date}",
+        "date": request.date,
+        "download_covers": request.download_covers
+    }
+
+@app.get("/api/admin/scrape/status")
+async def get_scrape_status():
+    """Get current scraping status"""
+    return scraping_status
+
+@app.delete("/api/admin/data/{date}")
+async def delete_data_by_date(date: str):
+    """Delete all data for a specific date"""
+    try:
+        # Try both date formats
+        try:
+            # Try DD-MM-YYYY format first
+            parsed_date = datetime.strptime(date, "%d-%m-%Y")
+            search_date = date
+        except ValueError:
+            # Try YYYY-MM-DD format
+            parsed_date = datetime.strptime(date, "%Y-%m-%d")
+            search_date = parsed_date.strftime("%d-%m-%Y")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use DD-MM-YYYY or YYYY-MM-DD")
+    
+    deleted_count = db.delete_albums_by_date(search_date)
+    
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"No data found for date {date}")
+    
+    return {
+        "message": f"Deleted {deleted_count} albums for {date}",
+        "date": date,
+        "deleted_albums": deleted_count
+    }
+
+@app.delete("/api/admin/data/range")
+async def delete_data_by_range(request: DeleteRangeRequest):
+    """Delete all data within a date range"""
+    try:
+        # Validate date formats
+        start_parsed = datetime.strptime(request.start_date, "%d-%m-%Y")
+        end_parsed = datetime.strptime(request.end_date, "%d-%m-%Y")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use DD-MM-YYYY")
+    
+    if start_parsed > end_parsed:
+        raise HTTPException(status_code=400, detail="Start date must be before or equal to end date")
+    
+    deleted_count = db.delete_albums_by_date_range(request.start_date, request.end_date)
+    
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"No data found in range {request.start_date} to {request.end_date}")
+    
+    return {
+        "message": f"Deleted {deleted_count} albums from {request.start_date} to {request.end_date}",
+        "start_date": request.start_date,
+        "end_date": request.end_date,
+        "deleted_albums": deleted_count
+    }
+
+@app.get("/api/admin/summary")
+async def get_admin_summary():
+    """Get database summary for admin dashboard"""
+    try:
+        summary = db.get_data_summary()
+        summary["scraping_status"] = scraping_status
+        return summary
+    except Exception as e:
+        logger.error(f"Error fetching admin summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch admin summary")
+
 # Serve React frontend (will be created next)
 @app.get("/")
 async def serve_frontend():
@@ -197,7 +387,7 @@ async def serve_frontend():
     if frontend_path.exists():
         return FileResponse(frontend_path)
     else:
-        return {"message": "Metal Albums API", "frontend": "not_built", "api_docs": "/docs"}
+        return {"message": "Metal Albums API", "frontend": "not_built", "api_docs": "/docs", "admin_endpoints": ["/api/admin/scrape", "/api/admin/scrape/status", "/api/admin/summary"]}
 
 # Mount static files for React build
 frontend_build_path = Path(__file__).parent / "frontend" / "build"

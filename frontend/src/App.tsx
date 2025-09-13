@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
 import DateBrowser from './components/DateBrowser';
 import AlbumDisplay from './components/AlbumDisplay';
+import AdminPanel from './components/AdminPanel';
 
 // Create a dark theme for the metal aesthetic
 const theme = createTheme({
@@ -69,6 +70,7 @@ function App() {
         <Routes>
           <Route path="/" element={<DateBrowser />} />
           <Route path="/date/:date" element={<AlbumDisplay />} />
+          <Route path="/admin" element={<AdminPanel />} />
         </Routes>
       </Router>
     </ThemeProvider>
