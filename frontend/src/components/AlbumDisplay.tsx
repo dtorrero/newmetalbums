@@ -140,13 +140,13 @@ const AlbumDisplay: React.FC = () => {
         ) : (
           <Box display="flex" flexDirection="column" gap={4}>
             {albums.map((album) => (
-              <Card key={album.id} elevation={3} sx={{ display: 'flex', minHeight: 300 }}>
+              <Card key={album.id} elevation={3} sx={{ display: 'flex', minHeight: 340 }}>
                   {/* Album Cover */}
-                  <Box sx={{ width: 250, flexShrink: 0, position: 'relative' }}>
+                  <Box sx={{ width: 320, flexShrink: 0, position: 'relative' }}>
                     <Box
                       sx={{
-                        width: 250,
-                        height: 250,
+                        width: 320,
+                        height: 320,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -161,7 +161,7 @@ const AlbumDisplay: React.FC = () => {
                           sx={{ 
                             width: '100%', 
                             height: '100%', 
-                            objectFit: 'cover',
+                            objectFit: 'contain',
                             position: 'absolute',
                             top: 0,
                             left: 0,
@@ -173,8 +173,9 @@ const AlbumDisplay: React.FC = () => {
                             target.style.display = 'none';
                           }}
                         />
-                      ) : null}
-                      <AlbumIcon sx={{ fontSize: 80, color: 'grey.500', zIndex: 1 }} />
+                      ) : (
+                        <AlbumIcon sx={{ fontSize: 80, color: 'grey.500' }} />
+                      )}
                     </Box>
                   </Box>
 
