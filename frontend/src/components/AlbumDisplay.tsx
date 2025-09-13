@@ -15,6 +15,9 @@ import {
   List,
   ListItem,
   ListItemText,
+  Dialog,
+  DialogContent,
+  IconButton,
 } from '@mui/material';
 import {
   ArrowBack,
@@ -24,6 +27,7 @@ import {
   Label,
   DateRange,
   Album as AlbumIcon,
+  Close,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -35,6 +39,11 @@ const AlbumDisplay: React.FC = () => {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [imageDialog, setImageDialog] = useState<{ open: boolean; imageUrl: string; albumName: string }>({ 
+    open: false, 
+    imageUrl: '', 
+    albumName: '' 
+  });
 
   useEffect(() => {
     const fetchAlbums = async () => {
@@ -165,9 +174,19 @@ const AlbumDisplay: React.FC = () => {
                             position: 'absolute',
                             top: 0,
                             left: 0,
+                            cursor: 'pointer',
+                            transition: 'transform 0.2s ease-in-out',
+                            '&:hover': {
+                              transform: 'scale(1.02)'
+                            }
                           }}
                           image={getCoverImageUrl(album) || ''}
                           alt={`${album.album_name} cover`}
+                          onClick={() => setImageDialog({ 
+                            open: true, 
+                            imageUrl: getCoverImageUrl(album) || '', 
+                            albumName: album.album_name 
+                          })}
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
                             target.style.display = 'none';
@@ -299,6 +318,51 @@ const AlbumDisplay: React.FC = () => {
             ))}
           </Box>
         )}
+
+        {/* Image Dialog */}
+        <Dialog
+          open={imageDialog.open}
+          onClose={() => setImageDialog({ open: false, imageUrl: '', albumName: '' })}
+          maxWidth="lg"
+          fullWidth
+          sx={{
+            '& .MuiDialog-paper': {
+              backgroundColor: 'rgba(0, 0, 0, 0.9)',
+              boxShadow: 'none',
+            }
+          }}
+        >
+          <DialogContent sx={{ p: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <IconButton
+              onClick={() => setImageDialog({ open: false, imageUrl: '', albumName: '' })}
+              sx={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                color: 'white',
+                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                zIndex: 1,
+                '&:hover': {
+                  backgroundColor: 'rgba(0, 0, 0, 0.7)'
+                }
+              }}
+            >
+              <Close />
+            </IconButton>
+            <Box
+              component="img"
+              src={imageDialog.imageUrl}
+              alt={`${imageDialog.albumName} cover - full size`}
+              sx={{
+                maxWidth: '100%',
+                maxHeight: '90vh',
+                objectFit: 'contain',
+                display: 'block'
+              }}
+              onClick={() => setImageDialog({ open: false, imageUrl: '', albumName: '' })}
+            />
+          </DialogContent>
+        </Dialog>
       </Box>
     </Container>
   );
