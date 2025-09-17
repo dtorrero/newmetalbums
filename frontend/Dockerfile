@@ -1,4 +1,5 @@
-FROM node:18-alpine as build
+# Multi-architecture support
+FROM --platform=$BUILDPLATFORM node:18-alpine as build
 
 # Set working directory
 WORKDIR /app

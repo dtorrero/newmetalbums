@@ -1,0 +1,53 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## New Metal Albums Release ${{ github.ref }}
+          
+          ### Docker Images
+          - Backend: `ghcr.io/${{ github.repository }}-backend:${{ github.ref_name }}`
+          - Frontend: `ghcr.io/${{ github.repository }}-frontend:${{ github.ref_name }}`
+          
+          ### Quick Start
+          ```bash
+          # Download production compose file
+          curl -O https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/docker-compose.production.yml
+          
+          # Update image tags to this release
+          sed -i 's/:latest/:${{ github.ref_name }}/g' docker-compose.production.yml
+          
+          # Start the application
+          docker-compose -f docker-compose.production.yml up -d
+          ```
+          
+          ### Supported Architectures
+          - linux/amd64 (Intel/AMD)
+          - linux/arm64 (Apple Silicon, ARM servers)
+          
+          ### What's Changed
+          - See commit history for detailed changes
+          
+        draft: false
+        prerelease: false
