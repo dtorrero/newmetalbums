@@ -17,12 +17,48 @@ A complete system for scraping, storing, and browsing metal album releases from 
 
 ### Using Pre-built Images
 
-```bash
-# Download production compose file
-curl -O https://raw.githubusercontent.com/dtorrero/newmetalbums/main/docker-compose.production.yml
+Create a `docker-compose.yml` file and copy this content:
 
-# Start the application
-docker-compose -f docker-compose.production.yml up -d
+```yaml
+version: '3.8'
+
+services:
+  backend:
+    image: ghcr.io/dtorrero/newmetalbums-backend:latest
+    container_name: newmetalbums-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./covers:/app/covers
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ENVIRONMENT=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    image: ghcr.io/dtorrero/newmetalbums-frontend:latest
+    container_name: newmetalbums-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+```
+
+Then start the application:
+
+```bash
+docker-compose up -d
 ```
 
 ### Building Locally
