@@ -53,16 +53,19 @@ class MetalArchivesScraper:
         try:
             self.playwright = await async_playwright().start()
             
-            # Launch Firefox browser with realistic settings
-            self.browser = await self.playwright.firefox.launch(
+            # Launch Chromium browser with realistic settings
+            self.browser = await self.playwright.chromium.launch(
                 headless=self.headless,
-                firefox_user_prefs={
-                    'privacy.resistFingerprinting': False,
-                    'privacy.trackingprotection.enabled': False,
-                    'browser.cache.disk.enable': True,
-                    'browser.cache.memory.enable': True,
-                    'general.useragent.override': random.choice(self.user_agents)
-                }
+                args=[
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process',
+                    '--disable-gpu'
+                ]
             )
             
             # Create browser context with random user agent
