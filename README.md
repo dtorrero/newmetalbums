@@ -1,61 +1,91 @@
 # Metal Albums Database
 
-A complete system for scraping, storing, and browsing metal album releases from Metal Archives.
+A complete system for scraping, storing, and browsing metal album releases from Metal Archives with a modern web interface and automated Docker deployment.
 
 ## 🎯 Features
 
-- **Automated Scraping**: Daily scraper with headless browser automation
+- **Metal Archives Scraper**: Automated scraping with Playwright browser automation
 - **Database Storage**: SQLite database with proper indexing and relationships  
 - **REST API**: FastAPI backend with search, filtering, and statistics
-- **Web Interface**: React + Material UI frontend (in development)
-- **Scheduler**: Built-in Python scheduler (no cron needed)
-- **Cover Art**: Automatic album cover downloading
+- **Modern Web Interface**: React + Material UI responsive frontend
+- **Admin Panel**: Manual scraping control and data management
+- **Cover Art**: Automatic album cover downloading and serving
+- **Docker Support**: Multi-architecture containers (AMD64/ARM64)
+- **GitHub Actions**: Automated builds and releases
 
-## 🚀 Quick Start
+## 🐳 Quick Start with Docker (Recommended)
 
-1. Clone this repository
-2. Install the required dependencies:
+### Using Pre-built Images
 
 ```bash
+# Download production compose file
+curl -O https://raw.githubusercontent.com/dtorrero/newmetalbums/main/docker-compose.production.yml
+
+# Start the application
+docker-compose -f docker-compose.production.yml up -d
+```
+
+### Building Locally
+
+```bash
+# Clone the repository
+git clone https://github.com/dtorrero/newmetalbums.git
+cd newmetalbums
+
+# Start with Docker Compose
+docker-compose up --build
+```
+
+**Access the application:**
+- **Frontend**: http://localhost
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+
+## 🛠️ Development Setup
+
+### Local Development
+
+```bash
+# Install Python dependencies
 pip install -r requirements.txt
+
+# Install Playwright browsers
+playwright install chromium
+
+# Install frontend dependencies
+cd frontend && npm install
+
+# Start development servers
+python start_dev.py
 ```
 
-3. Install Playwright browsers:
+## 📱 Using the Web Interface
+
+### Admin Panel
+1. Navigate to http://localhost/admin
+2. Select a date to scrape
+3. Click "Start Scraping" to fetch new albums
+4. Monitor progress and view results
+
+### Browse Albums
+1. Visit http://localhost
+2. Use the date picker to browse releases by date
+3. Click album covers for full-size view
+4. Search and filter albums
+
+## 🔧 Manual Scraping (CLI)
 
 ```bash
-playwright install firefox
-```
-
-## Usage
-
-Run the scraper with a date in YYYY-MM-DD format:
-
-```bash
+# Scrape albums for a specific date
 python scraper.py 2025-08-31 --output albums.json
-```
 
-### Examples
-
-```bash
-# Scrape albums released on August 31st, 2025
-python scraper.py 2025-08-31 --output albums.json
-
-# Scrape albums from a different date
+# Different date example
 python scraper.py 2025-12-25 --output christmas_albums.json
 ```
 
-### Arguments
-
-- `date`: The release date to search for (required, format: YYYY-MM-DD)
+### CLI Arguments
+- `date`: Release date to search (YYYY-MM-DD format)
 - `--output`: Output JSON file path (default: albums.json)
-
-### Performance
-
-The scraper is optimized for efficiency:
-- **Smart filtering**: Only processes albums matching the target date
-- **Automatic cover downloads**: Downloads covers during enrichment
-- **Bandcamp extraction**: Fetches Bandcamp links via AJAX endpoints
-- **Rate limiting**: Respects Metal Archives with delays and jitter
 
 ## Output Format
 
@@ -99,27 +129,70 @@ The script generates a JSON file containing an array of album objects with compr
 - **Bandcamp Links**: Direct links to Bandcamp pages when available
 - **Rich Metadata**: Catalog IDs, version descriptions, and more
 
-## File Structure
+## 🐳 Docker Deployment
+
+### Multi-Architecture Support
+Images are automatically built for:
+- **linux/amd64**: Intel/AMD processors
+- **linux/arm64**: Apple Silicon, ARM servers, Raspberry Pi
+
+### Production Deployment
+```bash
+# Using pre-built images (recommended)
+docker-compose -f docker-compose.production.yml up -d
+
+# Building locally
+docker-compose up --build
+```
+
+### Environment Variables
+- `ENVIRONMENT`: Set to `production` or `development`
+- `PYTHONUNBUFFERED`: Python output buffering (default: 1)
+- `REACT_APP_API_URL`: Frontend API URL (default: http://localhost:8000)
+
+## 📁 Project Structure
 
 ```
 newmetalbums/
-├── scraper.py          # Main scraper script
-├── models.py           # Data models with Pydantic validation
-├── config.py           # Configuration settings
-├── requirements.txt    # Python dependencies
-├── albums.json         # Output file with scraped data
-└── covers/            # Downloaded album covers
-    ├── 1234567.jpg
-    └── 7654321.jpg
+├── backend/
+│   ├── scraper.py          # Metal Archives scraper
+│   ├── web_server.py       # FastAPI backend
+│   ├── db_manager.py       # Database operations
+│   ├── models.py           # Data models
+│   └── config.py           # Configuration
+├── frontend/               # React application
+│   ├── src/
+│   │   ├── components/     # React components
+│   │   └── api/           # API client
+│   ├── public/            # Static assets
+│   └── Dockerfile         # Frontend container
+├── .github/workflows/     # GitHub Actions
+├── data/                  # SQLite database
+├── covers/               # Album cover images
+└── docker-compose.yml    # Local development
 ```
 
-## Dependencies
+## 🚀 GitHub Actions
 
-- **playwright**: Browser automation for reliable scraping
-- **beautifulsoup4**: HTML parsing and extraction
-- **pydantic**: Data validation and modeling
-- **asyncio**: Asynchronous programming support
+Automated builds trigger on:
+- **Push to main**: Builds latest images
+- **Tagged releases**: Creates versioned releases
+- **Pull requests**: Builds for testing
 
-## License
+Images are published to GitHub Container Registry with vulnerability scanning.
 
-MIT
+## 📖 Documentation
+
+- **[Docker Setup](README-Docker.md)**: Detailed Docker instructions
+- **[GitHub Actions](README-GitHub-Actions.md)**: CI/CD setup guide
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## 📄 License
+
+MIT License - see LICENSE file for details
