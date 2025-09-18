@@ -124,6 +124,26 @@ jobs:
           type=semver,pattern={{major}}.{{minor}}
           type=raw,value=latest,enable={{is_default_branch}}
 
+    - name: Log in to Container Registry for scanning
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Verify image exists
+      run: |
+        IMAGE_TAG="${{ fromJSON(steps.meta-scan.outputs.json).tags[0] }}"
+        echo "Checking if image exists: $IMAGE_TAG"
+        if docker manifest inspect "$IMAGE_TAG" > /dev/null 2>&1; then
+          echo "✅ Image found: $IMAGE_TAG"
+        else
+          echo "❌ Image not found: $IMAGE_TAG"
+          echo "Available images for this repository:"
+          docker search ghcr.io/${{ github.repository }}-backend || true
+          exit 1
+        fi
+
     - name: Run Trivy vulnerability scanner on backend
       uses: aquasecurity/trivy-action@master
       with:
