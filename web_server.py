@@ -7,11 +7,13 @@ Serves API endpoints and static frontend files
 import asyncio
 import threading
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, date
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 import uvicorn
@@ -20,14 +22,35 @@ from pathlib import Path
 from db_manager import AlbumsDatabase, ingest_json_files
 from scraper import MetalArchivesScraper
 from models import Album
+from auth_manager import AuthManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global database instance
+db = AlbumsDatabase()
+
+# Global auth manager instance
+auth_manager = AuthManager()
+
+# Security scheme for JWT tokens
+security = HTTPBearer()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    db.connect()
+    logger.info("🗄️ Database connected")
+    yield
+    # Shutdown
+    db.close()
+    logger.info("🗄️ Database disconnected")
+
 app = FastAPI(
     title="Metal Albums API",
     description="API for browsing metal album releases",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS middleware for development
@@ -39,8 +62,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global database instance
-db = AlbumsDatabase()
 
 # Global scraping status
 scraping_status = {
@@ -67,17 +88,31 @@ class DeleteRangeRequest(BaseModel):
     start_date: str
     end_date: str
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database connection on startup"""
-    db.connect()
-    logger.info("🗄️ Database connected")
+# Authentication models
+class SetupRequest(BaseModel):
+    password: str
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Close database connection on shutdown"""
-    db.close()
-    logger.info("🗄️ Database disconnected")
+class LoginRequest(BaseModel):
+    password: str
+    remember_me: bool = False
+
+class AuthResponse(BaseModel):
+    success: bool
+    token: Optional[str] = None
+    message: str
+    expires_hours: Optional[int] = None
+
+# Authentication middleware
+async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Verify JWT token for admin access"""
+    if not auth_manager.verify_token(credentials.credentials):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return credentials.credentials
+
 
 @app.get("/api/dates")
 async def get_available_dates():
@@ -322,7 +357,7 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             pass
 
 @app.post("/api/admin/scrape")
-async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks):
+async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks, token: str = Depends(verify_admin_token)):
     """Trigger manual scraping for a specific date"""
     if scraping_status["is_running"]:
         raise HTTPException(status_code=409, detail="Scraping is already in progress")
@@ -354,12 +389,12 @@ async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTas
     }
 
 @app.get("/api/admin/scrape/status")
-async def get_scrape_status():
+async def get_scrape_status(token: str = Depends(verify_admin_token)):
     """Get current scraping status"""
     return scraping_status
 
 @app.delete("/api/admin/data/{date}")
-async def delete_data_by_date(date: str):
+async def delete_data_by_date(date: str, token: str = Depends(verify_admin_token)):
     """Delete all data for a specific date"""
     search_date = None
     
@@ -387,7 +422,7 @@ async def delete_data_by_date(date: str):
     }
 
 @app.delete("/api/admin/data/range")
-async def delete_data_by_range(request: DeleteRangeRequest):
+async def delete_data_by_range(request: DeleteRangeRequest, token: str = Depends(verify_admin_token)):
     """Delete all data within a date range"""
     try:
         # Validate date formats
@@ -412,7 +447,7 @@ async def delete_data_by_range(request: DeleteRangeRequest):
     }
 
 @app.get("/api/admin/summary")
-async def get_admin_summary():
+async def get_admin_summary(token: str = Depends(verify_admin_token)):
     """Get database summary for admin dashboard"""
     try:
         summary = db.get_data_summary()
@@ -421,6 +456,68 @@ async def get_admin_summary():
     except Exception as e:
         logger.error(f"Error fetching admin summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch admin summary")
+
+# Authentication endpoints
+@app.get("/api/auth/status")
+async def get_auth_status():
+    """Get authentication status (public endpoint)"""
+    return auth_manager.get_auth_status()
+
+@app.post("/api/auth/setup", response_model=AuthResponse)
+async def setup_admin_password(request: SetupRequest):
+    """Set up admin password for first-time use"""
+    try:
+        if not auth_manager.is_first_time_setup():
+            raise HTTPException(status_code=409, detail="Admin password already set")
+        
+        auth_manager.set_admin_password(request.password)
+        token = auth_manager.generate_token(expires_hours=24)
+        
+        return AuthResponse(
+            success=True,
+            token=token,
+            message="Admin password set successfully",
+            expires_hours=24
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Setup error: {e}")
+        raise HTTPException(status_code=500, detail="Setup failed")
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def admin_login(request: LoginRequest):
+    """Admin login endpoint"""
+    try:
+        if auth_manager.is_first_time_setup():
+            raise HTTPException(status_code=409, detail="First-time setup required")
+        
+        if auth_manager.verify_password(request.password):
+            expires_hours = 168 if request.remember_me else 24  # 7 days or 24 hours
+            token = auth_manager.generate_token(expires_hours=expires_hours)
+            
+            return AuthResponse(
+                success=True,
+                token=token,
+                message="Login successful",
+                expires_hours=expires_hours
+            )
+        else:
+            raise HTTPException(status_code=401, detail="Invalid password")
+    
+    except ValueError as e:
+        # Handle account locked or other auth errors
+        raise HTTPException(status_code=423, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+@app.post("/api/auth/verify")
+async def verify_token_endpoint(token: str = Depends(verify_admin_token)):
+    """Verify if token is valid (protected endpoint)"""
+    return {"valid": True, "message": "Token is valid"}
 
 # Serve React frontend (will be created next)
 @app.get("/")

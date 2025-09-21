@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
-  Paper,
   Typography,
   Box,
   Button,
@@ -33,9 +32,11 @@ import {
   Home,
   Schedule,
   Storage,
-  Warning
+  Warning,
+  Logout
 } from '@mui/icons-material';
 import { Link } from 'react-router-dom';
+import { authFetch, logout } from '../utils/auth';
 
 interface ScrapeStatus {
   is_running: boolean;
@@ -82,35 +83,32 @@ const AdminPanel: React.FC = () => {
     setSnackbar({ open: true, message, severity });
   };
 
-  const fetchScrapeStatus = async () => {
+  const fetchScrapeStatus = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/admin/scrape/status`);
+      const response = await authFetch(`${API_BASE}/api/admin/scrape/status`);
       const data = await response.json();
       setScrapeStatus(data);
     } catch (error) {
       console.error('Error fetching scrape status:', error);
     }
-  };
+  }, [API_BASE]);
 
-  const fetchAdminSummary = async () => {
+  const fetchAdminSummary = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/admin/summary`);
+      const response = await authFetch(`${API_BASE}/api/admin/summary`);
       const data = await response.json();
       setAdminSummary(data);
     } catch (error) {
       console.error('Error fetching admin summary:', error);
       showSnackbar('Failed to fetch admin summary', 'error');
     }
-  };
+  }, [API_BASE]);
 
   const handleScrape = async (forceRescrape = false) => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/admin/scrape`, {
+      const response = await authFetch(`${API_BASE}/api/admin/scrape`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           date: scrapeDate,
           download_covers: downloadCovers,
@@ -153,7 +151,7 @@ const AdminPanel: React.FC = () => {
 
   const handleDeleteDate = async (date: string) => {
     try {
-      const response = await fetch(`${API_BASE}/api/admin/data/${date}`, {
+      const response = await authFetch(`${API_BASE}/api/admin/data/${date}`, {
         method: 'DELETE',
       });
 
@@ -201,7 +199,7 @@ const AdminPanel: React.FC = () => {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [scrapeStatus?.is_running]);
+  }, [fetchScrapeStatus, fetchAdminSummary, scrapeStatus?.is_running]);
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -210,6 +208,15 @@ const AdminPanel: React.FC = () => {
         <Typography variant="h3" component="h1" sx={{ flexGrow: 1 }}>
           🔧 Admin Panel
         </Typography>
+        <Button
+          onClick={logout}
+          startIcon={<Logout />}
+          variant="outlined"
+          color="secondary"
+          sx={{ mr: 1 }}
+        >
+          Logout
+        </Button>
         <Button
           component={Link}
           to="/"
