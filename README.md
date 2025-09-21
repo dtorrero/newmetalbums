@@ -13,221 +13,58 @@ A complete system for scraping, storing, and browsing metal album releases from 
 - **Docker Support**: Multi-architecture containers (AMD64/ARM64)
 - **GitHub Actions**: Automated builds and releases
 
-## 🐳 Quick Start with Docker (Recommended)
+## 🚀 Quick Start
 
-### Using Pre-built Images
+**Works on any platform: x64, ARM64, Raspberry Pi, etc.**
 
-Create a `docker-compose.yml` file and copy this content:
+1. **Download and run:**
+   ```bash
+   curl -O https://raw.githubusercontent.com/dtorrero/newmetalbums/main/docker-compose.yml
+   docker-compose up -d
+   ```
 
-```yaml
-version: '3.8'
+2. **Access your application:**
+   - **Web Interface**: http://localhost
+   - **Admin Panel**: http://localhost/admin
 
-services:
-  backend:
-    image: ghcr.io/dtorrero/newmetalbums-backend:latest
-    container_name: newmetalbums-backend
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./data:/app/data
-      - ./covers:/app/covers
-    environment:
-      - PYTHONUNBUFFERED=1
-      - ENVIRONMENT=production
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+3. **First-time setup:**
+   - Visit the admin panel and set your password (8+ characters)
+   - Start scraping metal album data
 
-  frontend:
-    image: ghcr.io/dtorrero/newmetalbums-frontend:latest
-    container_name: newmetalbums-frontend
-    ports:
-      - "80:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
-    environment:
-      - REACT_APP_API_URL=http://localhost:8000
-```
-
-Then start the application:
+### 🛠️ Development
 
 ```bash
-docker-compose up -d
-```
-
-### Building Locally
-
-```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/dtorrero/newmetalbums.git
 cd newmetalbums
 
-# Start with Docker Compose
-docker-compose up --build
-```
-
-**Access the application:**
-- **Frontend**: http://localhost
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-
-## 🛠️ Development Setup
-
-### Local Development
-
-```bash
-# Install Python dependencies
+# Setup Python environment
+python -m venv env
+source env/bin/activate
 pip install -r requirements.txt
-
-# Install Playwright browsers
 playwright install chromium
-
-# Install frontend dependencies
-cd frontend && npm install
 
 # Start development servers
 python start_dev.py
 ```
 
-## 📱 Using the Web Interface
+**Access:**
+- Frontend: http://localhost:3000
+- Backend API: http://127.0.0.1:8000
+- API Docs: http://127.0.0.1:8000/docs
 
-### Admin Panel
-1. Navigate to http://localhost/admin
-2. Select a date to scrape
-3. Click "Start Scraping" to fetch new albums
-4. Monitor progress and view results
-
-### Browse Albums
-1. Visit http://localhost
-2. Use the date picker to browse releases by date
-3. Click album covers for full-size view
-4. Search and filter albums
-
-## 🔧 Manual Scraping (CLI)
+### 🛠️ Management
 
 ```bash
-# Scrape albums for a specific date
-python scraper.py 2025-08-31 --output albums.json
+# Update to latest version
+docker-compose pull && docker-compose up -d
 
-# Different date example
-python scraper.py 2025-12-25 --output christmas_albums.json
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
 ```
-
-### CLI Arguments
-- `date`: Release date to search (YYYY-MM-DD format)
-- `--output`: Output JSON file path (default: albums.json)
-
-## Output Format
-
-The script generates a JSON file containing an array of album objects with comprehensive data:
-
-```json
-{
-  "band_name": "Example Band",
-  "band_id": "3540123456",
-  "band_url": "https://www.metal-archives.com/bands/Example_Band/3540123456",
-  "album_name": "Example Album",
-  "album_id": "1234567",
-  "album_url": "https://www.metal-archives.com/albums/Example_Band/Example_Album/1234567",
-  "release_date": "2025-08-31",
-  "release_date_raw": "August 31st, 2025 <!-- 2025-08-31 -->",
-  "type": "Full-length",
-  "cover_art": "https://www.metal-archives.com/images/1/2/3/4/1234567.jpg",
-  "cover_path": "covers/1234567.jpg",
-  "bandcamp_url": "https://exampleband.bandcamp.com/",
-  "tracklist": [
-    {
-      "number": "1.",
-      "name": "Track Name",
-      "length": "04:32"
-    }
-  ],
-  "details": {
-    "type_": "Full-length",
-    "release_date_": "August 31st, 2025",
-    "catalog_id_": "LABEL001",
-    "version_desc__": "Limited edition"
-  }
-}
-```
-
-### Key Features
-
-- **Complete Album Data**: Title, URL, release date, type, tracklist
-- **Band Information**: Name, URL, Metal Archives ID
-- **Cover Art**: Both URL and local file path
-- **Bandcamp Links**: Direct links to Bandcamp pages when available
-- **Rich Metadata**: Catalog IDs, version descriptions, and more
-
-## 🐳 Docker Deployment
-
-### Multi-Architecture Support
-Images are automatically built for:
-- **linux/amd64**: Intel/AMD processors
-- **linux/arm64**: Apple Silicon, ARM servers, Raspberry Pi
-
-### Production Deployment
-```bash
-# Using pre-built images (recommended)
-docker-compose -f docker-compose.production.yml up -d
-
-# Building locally
-docker-compose up --build
-```
-
-### Environment Variables
-- `ENVIRONMENT`: Set to `production` or `development`
-- `PYTHONUNBUFFERED`: Python output buffering (default: 1)
-- `REACT_APP_API_URL`: Frontend API URL (default: http://localhost:8000)
-
-## 📁 Project Structure
-
-```
-newmetalbums/
-├── backend/
-│   ├── scraper.py          # Metal Archives scraper
-│   ├── web_server.py       # FastAPI backend
-│   ├── db_manager.py       # Database operations
-│   ├── models.py           # Data models
-│   └── config.py           # Configuration
-├── frontend/               # React application
-│   ├── src/
-│   │   ├── components/     # React components
-│   │   └── api/           # API client
-│   ├── public/            # Static assets
-│   └── Dockerfile         # Frontend container
-├── .github/workflows/     # GitHub Actions
-├── data/                  # SQLite database
-├── covers/               # Album cover images
-└── docker-compose.yml    # Local development
-```
-
-## 🚀 GitHub Actions
-
-Automated builds trigger on:
-- **Push to main**: Builds latest images
-- **Tagged releases**: Creates versioned releases
-- **Pull requests**: Builds for testing
-
-Images are published to GitHub Container Registry with vulnerability scanning.
-
-## 📖 Documentation
-
-- **[Docker Setup](README-Docker.md)**: Detailed Docker instructions
-- **[GitHub Actions](README-GitHub-Actions.md)**: CI/CD setup guide
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
 
 ## 📄 License
 

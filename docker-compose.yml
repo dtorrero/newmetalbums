@@ -1,24 +1,20 @@
 version: '3.8'
 
+# Production deployment using pre-built images from GitHub Container Registry
+# Multi-architecture support: x64, ARM64, Raspberry Pi
+
 services:
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
+    # Pre-built multi-architecture image from GitHub Container Registry
+    image: ghcr.io/dtorrero/newmetalbums-backend:latest
     container_name: newmetalbums-backend
-    # No external ports - only accessible via internal Docker network
+    # Backend is NOT exposed externally - only accessible via internal network
     expose:
       - "8000"
     volumes:
-      # Persist database and covers
+      # Persist database and album covers
       - ./data:/app/data
       - ./covers:/app/covers
-      # Mount source code for development (optional)
-      - ./web_server.py:/app/web_server.py
-      - ./db_manager.py:/app/db_manager.py
-      - ./scraper.py:/app/scraper.py
-      - ./models.py:/app/models.py
-      - ./config.py:/app/config.py
     environment:
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
@@ -30,13 +26,13 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - app-network
+      - newmetalbums-network
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    # Pre-built multi-architecture image from GitHub Container Registry  
+    image: ghcr.io/dtorrero/newmetalbums-frontend:latest
     container_name: newmetalbums-frontend
+    # Frontend is the ONLY service exposed to the internet
     ports:
       - "80:80"
     depends_on:
@@ -44,36 +40,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
     environment:
-      # Frontend proxies API calls through nginx, no direct backend access needed
+      # Production mode - nginx proxies all API calls to backend
       - REACT_APP_API_URL=""
     networks:
-      - app-network
+      - newmetalbums-network
 
-  # Development override service (optional)
-  backend-dev:
-    profiles: ["dev"]
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    container_name: newmetalbums-backend-dev
-    ports:
-      - "8000:8000"  # Dev mode keeps direct access for debugging
-    volumes:
-      - ./data:/app/data
-      - ./covers:/app/covers
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - ENVIRONMENT=development
-    command: ["python", "-m", "uvicorn", "web_server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-    restart: unless-stopped
-    networks:
-      - app-network
-
+# Isolated network for secure internal communication
 networks:
-  app-network:
+  newmetalbums-network:
     driver: bridge
 
+# Persistent volumes for data and covers
 volumes:
   data:
   covers:
