@@ -3,9 +3,10 @@
 import axios from 'axios';
 import { DatesResponse, AlbumsResponse, SearchResponse, StatsResponse } from '../types';
 
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? '' // Use relative URLs in production
-  : 'http://127.0.0.1:8000'; // Development backend
+// Get API base URL - in production (Docker), nginx proxies everything, so use relative URLs
+const API_BASE_URL = (process.env.NODE_ENV === 'production' || process.env.REACT_APP_API_URL === '')
+  ? '' // Use relative URLs - nginx will proxy to backend
+  : 'http://127.0.0.1:8000'; // Development mode - direct backend access
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

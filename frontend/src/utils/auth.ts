@@ -45,8 +45,18 @@ export interface AuthStatus {
   last_login: string | null;
 }
 
+// Get API base URL - in production, nginx proxies everything, so use relative URLs
+function getApiBase(): string {
+  // Check if we're in Docker production environment (nginx proxy)
+  if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_API_URL === '') {
+    return ''; // Use relative URLs - nginx will proxy to backend
+  }
+  // Development mode - direct backend access
+  return 'http://127.0.0.1:8000';
+}
+
 export async function checkAuthStatus(): Promise<AuthStatus> {
-  const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+  const API_BASE = getApiBase();
   const response = await fetch(`${API_BASE}/api/auth/status`);
   return response.json();
 }
@@ -59,7 +69,7 @@ export interface AuthResponse {
 }
 
 export async function setupPassword(password: string): Promise<AuthResponse> {
-  const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+  const API_BASE = getApiBase();
   const response = await fetch(`${API_BASE}/api/auth/setup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -76,7 +86,7 @@ export async function setupPassword(password: string): Promise<AuthResponse> {
 }
 
 export async function login(password: string, rememberMe: boolean = false): Promise<AuthResponse> {
-  const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+  const API_BASE = getApiBase();
   const response = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

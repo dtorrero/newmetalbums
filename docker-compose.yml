@@ -6,8 +6,9 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     container_name: newmetalbums-backend
-    ports:
-      - "8000:8000"
+    # No external ports - only accessible via internal Docker network
+    expose:
+      - "8000"
     volumes:
       # Persist database and covers
       - ./data:/app/data
@@ -28,6 +29,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - app-network
 
   frontend:
     build:
@@ -41,7 +44,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      # Frontend proxies API calls through nginx, no direct backend access needed
+      - REACT_APP_API_URL=""
+    networks:
+      - app-network
 
   # Development override service (optional)
   backend-dev:
@@ -51,7 +57,7 @@ services:
       dockerfile: Dockerfile.backend
     container_name: newmetalbums-backend-dev
     ports:
-      - "8000:8000"
+      - "8000:8000"  # Dev mode keeps direct access for debugging
     volumes:
       - ./data:/app/data
       - ./covers:/app/covers
@@ -61,6 +67,12 @@ services:
       - ENVIRONMENT=development
     command: ["python", "-m", "uvicorn", "web_server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   data:

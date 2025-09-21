@@ -77,7 +77,15 @@ const AdminPanel: React.FC = () => {
   const [deleteDialog, setDeleteDialog] = useState({ open: false, date: '', type: 'single' as 'single' | 'range' });
   const [forceDialog, setForceDialog] = useState({ open: false, message: '', albumCount: 0 });
 
-  const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+  // Get API base URL - in production, nginx proxies everything, so use relative URLs
+  const getApiBase = () => {
+    if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_API_URL === '') {
+      return ''; // Use relative URLs - nginx will proxy to backend
+    }
+    return 'http://127.0.0.1:8000'; // Development mode - direct backend access
+  };
+  
+  const API_BASE = getApiBase();
 
   const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' = 'info') => {
     setSnackbar({ open: true, message, severity });
