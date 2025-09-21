@@ -40,7 +40,8 @@ security = HTTPBearer()
 async def lifespan(app: FastAPI):
     # Startup
     db.connect()
-    logger.info("🗄️ Database connected")
+    db.create_tables()  # Create tables if they don't exist
+    logger.info("🗄️ Database connected and initialized")
     yield
     # Shutdown
     db.close()
