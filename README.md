@@ -68,4 +68,4 @@ docker-compose down
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+Unlicense (Public Domain) - see LICENSE file for details
