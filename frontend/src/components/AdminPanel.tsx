@@ -47,6 +47,8 @@ interface ScrapeStatus {
   error: string | null;
   start_time: string | null;
   end_time: string | null;
+  should_stop: boolean;
+  rate_limited: boolean;
 }
 
 interface AdminSummary {
@@ -155,6 +157,26 @@ const AdminPanel: React.FC = () => {
   const handleForceRescrape = () => {
     setForceDialog({ open: false, message: '', albumCount: 0 });
     handleScrape(true);
+  };
+
+  const handleStopScraping = async () => {
+    try {
+      setLoading(true);
+      const response = await authFetch(`${API_BASE}/api/admin/scrape/stop`, {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        showSnackbar(data.message, 'info');
+      } else {
+        const error = await response.json();
+        showSnackbar(error.detail || 'Failed to stop scraping', 'error');
+      }
+    } catch (error) {
+      showSnackbar('Network error occurred', 'error');
+    }
+    setLoading(false);
   };
 
   const handleDeleteDate = async (date: string) => {
@@ -266,21 +288,34 @@ const AdminPanel: React.FC = () => {
                 />
               </Box>
 
-              <Button
-                fullWidth
-                variant="contained"
-                startIcon={<PlayArrow />}
-                onClick={() => handleScrape()}
-                disabled={loading || scrapeStatus?.is_running}
-                sx={{ mb: 2 }}
-              >
-                {scrapeStatus?.is_running ? 'Scraping...' : 'Start Scraping'}
-              </Button>
+              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  startIcon={<PlayArrow />}
+                  onClick={() => handleScrape()}
+                  disabled={loading || scrapeStatus?.is_running}
+                >
+                  {scrapeStatus?.is_running ? 'Scraping...' : 'Start Scraping'}
+                </Button>
+                
+                {scrapeStatus?.is_running && (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={() => handleStopScraping()}
+                    disabled={loading}
+                    sx={{ minWidth: '120px' }}
+                  >
+                    Stop
+                  </Button>
+                )}
+              </Box>
 
               {/* Scraping Status */}
               {scrapeStatus && (
                 <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
                     <Chip
                       label={scrapeStatus.is_running ? 'Running' : 'Idle'}
                       color={scrapeStatus.is_running ? 'primary' : 'default'}
@@ -288,6 +323,14 @@ const AdminPanel: React.FC = () => {
                     />
                     {scrapeStatus.current_date && (
                       <Chip label={`Date: ${scrapeStatus.current_date}`} size="small" />
+                    )}
+                    {scrapeStatus.rate_limited && (
+                      <Chip 
+                        label="Rate Limited" 
+                        color="warning" 
+                        size="small"
+                        icon={<Warning />}
+                      />
                     )}
                   </Box>
                   
@@ -306,6 +349,13 @@ const AdminPanel: React.FC = () => {
                   {scrapeStatus.error && (
                     <Alert severity="error" sx={{ mt: 1 }}>
                       {scrapeStatus.error}
+                    </Alert>
+                  )}
+                  
+                  {scrapeStatus.rate_limited && (
+                    <Alert severity="warning" sx={{ mt: 1 }}>
+                      <strong>Rate Limited:</strong> Metal Archives is blocking requests. 
+                      Try waiting 10-15 minutes before scraping again, or try a different date.
                     </Alert>
                   )}
                 </Box>

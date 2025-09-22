@@ -70,10 +70,12 @@ scraping_status = {
     "current_date": None,
     "progress": 0,
     "total": 0,
-    "status_message": "Idle",
-    "error": None,
+    "status_message": "Ready",
     "start_time": None,
-    "end_time": None
+    "end_time": None,
+    "error": None,
+    "should_stop": False,
+    "rate_limited": False
 }
 
 # Pydantic models for admin endpoints
@@ -272,7 +274,9 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             "status_message": "Initializing scraper...",
             "error": None,
             "start_time": datetime.now().isoformat(),
-            "end_time": None
+            "end_time": None,
+            "should_stop": False,
+            "rate_limited": False
         })
         
         # Initialize scraper
@@ -283,15 +287,34 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         
         # Run the scraper
         date_obj = datetime.strptime(scrape_date, "%d-%m-%Y").date()
+        
+        # Check for stop signal before starting
+        if scraping_status["should_stop"]:
+            raise Exception("Scraping stopped by user")
+            
         albums_data = await scraper.search_albums_by_date(date_obj)
+        
+        # Check if we got rate limited (empty results or specific error patterns)
+        if not albums_data:
+            scraping_status["rate_limited"] = True
+            scraping_status["status_message"] = "No albums found - possibly rate limited by Metal Archives"
+            logger.warning(f"No albums found for {scrape_date} - possible rate limiting")
         
         # Convert to Album objects if needed
         albums = []
-        for album_data in albums_data:
+        for i, album_data in enumerate(albums_data):
+            # Check for stop signal during processing
+            if scraping_status["should_stop"]:
+                raise Exception("Scraping stopped by user")
+                
             album = Album.from_scraped_data(album_data)
             if download_covers:
                 await scraper.download_cover(album_data)
             albums.append(album)
+            
+            # Update progress
+            scraping_status["progress"] = i + 1
+            scraping_status["total"] = len(albums_data)
         
         scraping_status.update({
             "progress": len(albums),
@@ -344,10 +367,23 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         
     except Exception as e:
         logger.error(f"Scraping failed: {e}")
+        
+        # Provide user-friendly error messages
+        error_message = str(e)
+        if "stopped by user" in error_message.lower():
+            status_message = "Scraping stopped by user"
+        elif "timeout" in error_message.lower() or "rate" in error_message.lower():
+            status_message = "Scraping failed: Possible rate limiting by Metal Archives. Try again later."
+            scraping_status["rate_limited"] = True
+        elif "connection" in error_message.lower():
+            status_message = "Scraping failed: Network connection error"
+        else:
+            status_message = f"Scraping failed: {error_message}"
+        
         scraping_status.update({
             "is_running": False,
-            "error": str(e),
-            "status_message": f"Scraping failed: {str(e)}",
+            "error": error_message,
+            "status_message": status_message,
             "end_time": datetime.now().isoformat()
         })
         
@@ -393,6 +429,19 @@ async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTas
 async def get_scrape_status(token: str = Depends(verify_admin_token)):
     """Get current scraping status"""
     return scraping_status
+
+@app.post("/api/admin/scrape/stop")
+async def stop_scraping(token: str = Depends(verify_admin_token)):
+    """Stop the currently running scraping process"""
+    global scraping_status
+    
+    if not scraping_status["is_running"]:
+        raise HTTPException(status_code=400, detail="No scraping process is currently running")
+    
+    scraping_status["should_stop"] = True
+    scraping_status["status_message"] = "Stopping scraping process..."
+    
+    return {"message": "Stop signal sent to scraping process"}
 
 @app.delete("/api/admin/data/{date}")
 async def delete_data_by_date(date: str, token: str = Depends(verify_admin_token)):
