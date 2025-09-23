@@ -49,6 +49,8 @@ interface ScrapeStatus {
   end_time: string | null;
   should_stop: boolean;
   rate_limited: boolean;
+  lock_held?: boolean;
+  user_friendly_status?: string;
 }
 
 interface AdminSummary {
@@ -78,6 +80,7 @@ const AdminPanel: React.FC = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'success' | 'error' | 'info' });
   const [deleteDialog, setDeleteDialog] = useState({ open: false, date: '', type: 'single' as 'single' | 'range' });
   const [forceDialog, setForceDialog] = useState({ open: false, message: '', albumCount: 0 });
+  const [scrapingInProgressDialog, setScrapingInProgressDialog] = useState({ open: false, message: '', currentDate: '' });
 
   // Get API base URL - in production, nginx proxies everything, so use relative URLs
   const getApiBase = () => {
@@ -131,19 +134,37 @@ const AdminPanel: React.FC = () => {
         showSnackbar(data.message, 'success');
         fetchScrapeStatus();
       } else if (response.status === 409 && !forceRescrape) {
-        // Handle existing data conflict
+        // Handle 409 conflicts - could be data exists OR scraping in progress
         const error = await response.json();
-        const message = error.detail || 'Data already exists';
+        const message = error.detail || 'Conflict occurred';
         
-        // Extract album count from message (format: "Data already exists for DD-MM-YYYY (X albums)...")
-        const countMatch = message.match(/\((\d+) albums?\)/);
-        const albumCount = countMatch ? parseInt(countMatch[1]) : 0;
-        
-        setForceDialog({
-          open: true,
-          message: message,
-          albumCount: albumCount
-        });
+        // Check if this is a "scraping in progress" error
+        if (message.includes('already in progress') || message.includes('currently stopping')) {
+          // This is a scraping conflict, not a data conflict
+          // Extract the current date being processed from the message
+          const dateMatch = message.match(/for (\d{2}-\d{2}-\d{4})/);
+          const currentDate = dateMatch ? dateMatch[1] : 'unknown date';
+          
+          setScrapingInProgressDialog({
+            open: true,
+            message: message,
+            currentDate: currentDate
+          });
+          
+          // Refresh status to show current scraping operation
+          fetchScrapeStatus();
+        } else {
+          // This is a data exists conflict - show overwrite dialog
+          // Extract album count from message (format: "Data already exists for DD-MM-YYYY (X albums)...")
+          const countMatch = message.match(/\((\d+) albums?\)/);
+          const albumCount = countMatch ? parseInt(countMatch[1]) : 0;
+          
+          setForceDialog({
+            open: true,
+            message: message,
+            albumCount: albumCount
+          });
+        }
       } else {
         const error = await response.json();
         showSnackbar(error.detail || 'Scraping failed', 'error');
@@ -335,7 +356,7 @@ const AdminPanel: React.FC = () => {
                   </Box>
                   
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    {scrapeStatus.status_message}
+                    {scrapeStatus.user_friendly_status || scrapeStatus.status_message}
                   </Typography>
                   
                   {scrapeStatus.is_running && scrapeStatus.total > 0 && (
@@ -517,6 +538,39 @@ const AdminPanel: React.FC = () => {
             onClick={handleForceRescrape}
           >
             Overwrite Data
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Scraping In Progress Notification Dialog */}
+      <Dialog 
+        open={scrapingInProgressDialog.open} 
+        onClose={() => setScrapingInProgressDialog({ open: false, message: '', currentDate: '' })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Schedule color="info" />
+          Scraping Already in Progress
+        </DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 2 }}>
+            A scraping operation is already running for <strong>{scrapingInProgressDialog.currentDate}</strong>.
+          </Typography>
+          <Typography sx={{ mb: 2 }}>
+            The scraping status you see below was started by another browser or session. 
+            You can monitor its progress here or stop it if needed.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Please wait for the current operation to complete before starting a new one.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setScrapingInProgressDialog({ open: false, message: '', currentDate: '' })}
+            variant="contained"
+          >
+            Got it
           </Button>
         </DialogActions>
       </Dialog>

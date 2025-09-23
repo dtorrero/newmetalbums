@@ -1,3 +1,6 @@
+# Plans and tests (temporary files)
+SCRAPER_IMPROVEMENTS_PLAN.md
+test_*.py
 # Logs
 logs
 *.log

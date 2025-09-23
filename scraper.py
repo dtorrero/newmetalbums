@@ -38,7 +38,7 @@ ALBUM_ID_PATTERN = re.compile(r'albums/.*?/(\d+)')
 class MetalArchivesScraper:
     """Improved Metal Archives scraper using Playwright for better reliability."""
     
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, stop_callback=None):
         self.playwright = None
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
@@ -47,6 +47,13 @@ class MetalArchivesScraper:
         self.user_agents = config.USER_AGENTS
         self.last_request_time = time.time()
         self.request_count = 0
+        self.stop_callback = stop_callback  # Callback to check if scraping should stop
+
+    def _should_stop(self) -> bool:
+        """Check if scraping should stop"""
+        if self.stop_callback:
+            return self.stop_callback()
+        return False
 
     async def initialize(self) -> None:
         """Initialize the Playwright browser with optimized settings."""
@@ -304,6 +311,11 @@ class MetalArchivesScraper:
         page_count = 0
         
         while True:
+            # Check for stop signal before each page
+            if self._should_stop():
+                logger.info("Stop signal received, aborting album search")
+                break
+                
             # Prepare search parameters
             params = {
                 'sEcho': '1',
@@ -348,6 +360,11 @@ class MetalArchivesScraper:
                 # Process album data and filter by date immediately
                 processed_count = 0
                 for album_data in data:
+                    # Check for stop signal during album processing
+                    if self._should_stop():
+                        logger.info("Stop signal received during album processing")
+                        return albums  # Return what we have so far
+                        
                     try:
                         # Parse basic album data without enrichment
                         album = await self._parse_album_data_basic(album_data)
@@ -506,6 +523,11 @@ class MetalArchivesScraper:
     async def _enrich_album_data(self, album: Dict) -> None:
         """Enrich album data with additional details from the album page."""
         if not album.get('album_url'):
+            return
+            
+        # Check for stop signal before enrichment
+        if self._should_stop():
+            logger.info("Stop signal received, skipping album enrichment")
             return
             
         try:

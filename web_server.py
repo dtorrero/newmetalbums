@@ -7,6 +7,7 @@ Serves API endpoints and static frontend files
 import asyncio
 import threading
 import json
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, date
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends
@@ -32,6 +33,9 @@ db = AlbumsDatabase()
 
 # Global auth manager instance
 auth_manager = AuthManager()
+
+# Global scraping lock to prevent multiple instances
+scraping_lock = asyncio.Lock()
 
 # Security scheme for JWT tokens
 security = HTTPBearer()
@@ -261,9 +265,25 @@ async def health_check():
 # ADMIN ENDPOINTS
 # ============================================================================
 
+async def run_scraper_task_with_lock(scrape_date: str, download_covers: bool = True):
+    """Wrapper function that runs scraper task with lock protection"""
+    async with scraping_lock:
+        logger.info(f"🔒 Acquired scraping lock for date: {scrape_date}")
+        try:
+            await run_scraper_task(scrape_date, download_covers)
+        except Exception as e:
+            logger.error(f"Error in locked scraper task: {e}")
+            raise
+        finally:
+            logger.info(f"🔓 Released scraping lock for date: {scrape_date}")
+
 async def run_scraper_task(scrape_date: str, download_covers: bool = True):
     """Background task to run the scraper"""
     global scraping_status
+    
+    # Define JSON filename early for cleanup purposes
+    json_filename = f"data/albums_{scrape_date}.json"
+    database_ingested = False  # Track if data was successfully saved to database
     
     try:
         scraping_status.update({
@@ -279,8 +299,11 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             "rate_limited": False
         })
         
-        # Initialize scraper
-        scraper = MetalArchivesScraper(headless=True)
+        # Initialize scraper with stop callback
+        def check_stop():
+            return scraping_status["should_stop"]
+        
+        scraper = MetalArchivesScraper(headless=True, stop_callback=check_stop)
         await scraper.initialize()
         
         scraping_status["status_message"] = f"Scraping albums for {scrape_date}..."
@@ -323,7 +346,7 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         })
         
         # Save to JSON file - flatten band data for database compatibility
-        json_filename = f"data/albums_{scrape_date}.json"
+        # json_filename already defined at function start
         flattened_albums = []
         for album in albums:
             album_dict = album.model_dump(by_alias=True)
@@ -356,11 +379,14 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         
         # Ingest into database
         ingest_json_files(db, json_filename)
+        database_ingested = True  # Mark successful database ingestion
         
         scraping_status.update({
             "is_running": False,
             "status_message": f"Successfully scraped and saved {len(albums)} albums for {scrape_date}",
-            "end_time": datetime.now().isoformat()
+            "end_time": datetime.now().isoformat(),
+            "should_stop": False,  # Reset stop flag after successful completion
+            "rate_limited": False  # Reset rate limited flag on success
         })
         
         await scraper.close()
@@ -368,13 +394,28 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
     except Exception as e:
         logger.error(f"Scraping failed: {e}")
         
+        # Cleanup partial JSON file if database ingestion wasn't completed
+        if not database_ingested and os.path.exists(json_filename):
+            try:
+                os.remove(json_filename)
+                logger.info(f"🧹 Cleaned up partial JSON file: {json_filename}")
+            except OSError as cleanup_error:
+                logger.warning(f"Could not remove partial JSON file {json_filename}: {cleanup_error}")
+        
         # Provide user-friendly error messages
         error_message = str(e)
+        
+        # Reset rate_limited flag by default
+        rate_limited = False
+        
         if "stopped by user" in error_message.lower():
             status_message = "Scraping stopped by user"
-        elif "timeout" in error_message.lower() or "rate" in error_message.lower():
-            status_message = "Scraping failed: Possible rate limiting by Metal Archives. Try again later."
-            scraping_status["rate_limited"] = True
+        elif "timeout" in error_message.lower():
+            status_message = "Scraping failed: Possible timeout. Try again later."
+            rate_limited = True
+        elif "rate limit" in error_message.lower() or "rate-limit" in error_message.lower():
+            status_message = "Scraping failed: Rate limited by Metal Archives. Try again later."
+            rate_limited = True
         elif "connection" in error_message.lower():
             status_message = "Scraping failed: Network connection error"
         else:
@@ -384,7 +425,9 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             "is_running": False,
             "error": error_message,
             "status_message": status_message,
-            "end_time": datetime.now().isoformat()
+            "end_time": datetime.now().isoformat(),
+            "should_stop": False,  # Reset stop flag after handling
+            "rate_limited": rate_limited  # Only set to True for actual rate limiting
         })
         
         # Cleanup scraper if it was initialized
@@ -396,14 +439,24 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
 @app.post("/api/admin/scrape")
 async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks, token: str = Depends(verify_admin_token)):
     """Trigger manual scraping for a specific date"""
-    if scraping_status["is_running"]:
-        raise HTTPException(status_code=409, detail="Scraping is already in progress")
-    
-    # Validate date format
+    # Validate date format first
     try:
         datetime.strptime(request.date, "%d-%m-%Y")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use DD-MM-YYYY")
+    
+    # PRIORITY CHECK: If scraping is already running, show current operation details
+    if scraping_status["is_running"] or scraping_lock.locked():
+        current_date = scraping_status.get("current_date", "unknown date")
+        current_status = scraping_status.get("status_message", "running")
+        
+        # Create a more informative error message
+        if scraping_status.get("should_stop"):
+            detail = f"Scraping is currently stopping (was processing {current_date}). Please wait for it to complete before starting a new operation."
+        else:
+            detail = f"Scraping is already in progress for {current_date} ({current_status}). Please wait for the current operation to complete or stop it first."
+        
+        raise HTTPException(status_code=409, detail=detail)
     
     # Check if data already exists for this date (convert to database format)
     db_date = datetime.strptime(request.date, "%d-%m-%Y").strftime("%Y-%m-%d")
@@ -416,8 +469,8 @@ async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTas
             detail=f"Data already exists for {request.date} ({existing_count} albums). Use force_rescrape=true to overwrite existing data."
         )
     
-    # Start background scraping task
-    background_tasks.add_task(run_scraper_task, request.date, request.download_covers)
+    # Start background scraping task with lock protection
+    background_tasks.add_task(run_scraper_task_with_lock, request.date, request.download_covers)
     
     return {
         "message": f"Scraping started for {request.date}",
@@ -428,15 +481,37 @@ async def trigger_scrape(request: ScrapeRequest, background_tasks: BackgroundTas
 @app.get("/api/admin/scrape/status")
 async def get_scrape_status(token: str = Depends(verify_admin_token)):
     """Get current scraping status"""
-    return scraping_status
+    # Add lock status and enhanced information
+    status_with_lock = scraping_status.copy()
+    status_with_lock["lock_held"] = scraping_lock.locked()
+    
+    # Add user-friendly status description
+    if status_with_lock.get("is_running"):
+        if status_with_lock.get("should_stop"):
+            status_with_lock["user_friendly_status"] = f"Stopping scraping for {status_with_lock.get('current_date', 'unknown date')}"
+        else:
+            status_with_lock["user_friendly_status"] = f"Scraping in progress for {status_with_lock.get('current_date', 'unknown date')}"
+    else:
+        status_with_lock["user_friendly_status"] = "Ready to start scraping"
+    
+    return status_with_lock
 
 @app.post("/api/admin/scrape/stop")
 async def stop_scraping(token: str = Depends(verify_admin_token)):
     """Stop the currently running scraping process"""
     global scraping_status
     
-    if not scraping_status["is_running"]:
+    # Check both status flag and lock to ensure consistency
+    if not scraping_status["is_running"] and not scraping_lock.locked():
         raise HTTPException(status_code=400, detail="No scraping process is currently running")
+    
+    # Additional safety check - if lock is held but status says not running, something is inconsistent
+    if scraping_lock.locked() and not scraping_status["is_running"]:
+        logger.warning("Inconsistent state detected: lock held but status shows not running")
+        raise HTTPException(
+            status_code=409, 
+            detail="Scraping process is in an inconsistent state. Please wait a moment and try again."
+        )
     
     scraping_status["should_stop"] = True
     scraping_status["status_message"] = "Stopping scraping process..."
