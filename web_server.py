@@ -24,6 +24,7 @@ from db_manager import AlbumsDatabase, ingest_json_files
 from scraper import MetalArchivesScraper
 from models import Album
 from auth_manager import AuthManager
+from genre_parser import GenreParser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -262,6 +263,247 @@ async def health_check():
     return {"status": "healthy", "message": "Metal Albums API is running"}
 
 # ============================================================================
+# GENRE ENDPOINTS
+# ============================================================================
+
+@app.get("/api/genres")
+async def get_genres(
+    category: Optional[str] = Query(None, description="Filter by category: base, modifier, style"),
+    limit: int = Query(100, description="Maximum results"),
+    include_stats: bool = Query(True, description="Include album counts")
+):
+    """Get all genres with optional filtering and statistics"""
+    try:
+        db = AlbumsDatabase()
+        db.connect()
+        
+        genres = db.get_all_genres(category=category, limit=limit)
+        
+        return {
+            "genres": genres,
+            "total": len(genres),
+            "category": category,
+            "include_stats": include_stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching genres: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch genres")
+    finally:
+        db.close()
+
+@app.get("/api/genres/search")
+async def search_genres(
+    q: str = Query(..., description="Search query"),
+    limit: int = Query(20, description="Maximum results")
+):
+    """Search genres with autocomplete functionality"""
+    try:
+        db = AlbumsDatabase()
+        db.connect()
+        
+        genres = db.search_genres(query=q, limit=limit)
+        
+        # Generate suggestions based on partial matches
+        suggestions = []
+        if len(genres) < limit:
+            # Add some common genre suggestions if not enough results
+            common_genres = ["Black Metal", "Death Metal", "Thrash Metal", "Heavy Metal", 
+                           "Doom Metal", "Power Metal", "Progressive Metal"]
+            for genre in common_genres:
+                if q.lower() in genre.lower() and genre not in [g['genre_name'] for g in genres]:
+                    suggestions.append(genre)
+        
+        return {
+            "genres": genres,
+            "total": len(genres),
+            "query": q,
+            "suggestions": suggestions[:5]  # Limit suggestions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching genres: {e}")
+        raise HTTPException(status_code=500, detail="Failed to search genres")
+    finally:
+        db.close()
+
+@app.get("/api/genres/{genre_name}")
+async def get_genre_details(genre_name: str):
+    """Get detailed information about a specific genre"""
+    try:
+        db = AlbumsDatabase()
+        db.connect()
+        
+        # Get genre from taxonomy
+        cursor = db.connection.cursor()
+        cursor.execute('''
+            SELECT gt.*, COALESCE(gs.album_count, 0) as album_count,
+                   gs.date_range_start, gs.date_range_end
+            FROM genre_taxonomy gt
+            LEFT JOIN genre_stats gs ON gt.genre_name = gs.genre_name
+            WHERE gt.genre_name = ? OR gt.normalized_name = ?
+        ''', (genre_name, genre_name))
+        
+        genre_info = cursor.fetchone()
+        if not genre_info:
+            raise HTTPException(status_code=404, detail=f"Genre '{genre_name}' not found")
+        
+        genre_dict = dict(genre_info)
+        
+        # Parse aliases JSON
+        if genre_dict.get('aliases'):
+            try:
+                genre_dict['aliases'] = json.loads(genre_dict['aliases'])
+            except:
+                genre_dict['aliases'] = []
+        
+        # Get related genres (same parent or children)
+        related_genres = []
+        if genre_dict.get('parent_genre'):
+            cursor.execute('''
+                SELECT genre_name, album_count FROM genre_taxonomy gt
+                LEFT JOIN genre_stats gs ON gt.genre_name = gs.genre_name
+                WHERE gt.parent_genre = ? AND gt.genre_name != ?
+                ORDER BY gs.album_count DESC
+                LIMIT 5
+            ''', (genre_dict['parent_genre'], genre_name))
+            related_genres = [dict(row) for row in cursor.fetchall()]
+        
+        genre_dict['related_genres'] = related_genres
+        
+        return genre_dict
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching genre details for {genre_name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch genre details")
+    finally:
+        db.close()
+
+@app.get("/api/genres/{genre_name}/related")
+async def get_related_genres(
+    genre_name: str,
+    limit: int = Query(10, description="Maximum related genres")
+):
+    """Get genres related to the specified genre"""
+    try:
+        db = AlbumsDatabase()
+        db.connect()
+        
+        # Get genres that frequently appear together with this genre
+        cursor = db.connection.cursor()
+        cursor.execute('''
+            SELECT pg2.genre_name, COUNT(*) as co_occurrence,
+                   AVG(pg2.confidence) as avg_confidence
+            FROM parsed_genres pg1
+            JOIN parsed_genres pg2 ON pg1.album_id = pg2.album_id
+            WHERE pg1.genre_name = ? AND pg2.genre_name != ?
+            GROUP BY pg2.genre_name
+            ORDER BY co_occurrence DESC, avg_confidence DESC
+            LIMIT ?
+        ''', (genre_name, genre_name, limit))
+        
+        related = [dict(row) for row in cursor.fetchall()]
+        
+        return {
+            "genre": genre_name,
+            "related_genres": related,
+            "total": len(related)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching related genres for {genre_name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch related genres")
+    finally:
+        db.close()
+
+@app.get("/api/albums/by-genre/{genre_name}")
+async def get_albums_by_genre(
+    genre_name: str,
+    date: Optional[str] = Query(None, description="Filter by specific date"),
+    date_from: Optional[str] = Query(None, description="Filter from date"),
+    date_to: Optional[str] = Query(None, description="Filter to date"),
+    limit: int = Query(50, description="Maximum results"),
+    offset: int = Query(0, description="Pagination offset")
+):
+    """Get albums filtered by genre with optional date filtering"""
+    try:
+        db = AlbumsDatabase()
+        db.connect()
+        
+        albums = db.get_albums_by_genre(
+            genre_name=genre_name,
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Get total count for pagination
+        cursor = db.connection.cursor()
+        count_query = '''
+            SELECT COUNT(DISTINCT a.album_id)
+            FROM albums a
+            JOIN parsed_genres pg ON a.album_id = pg.album_id
+            WHERE pg.genre_name = ?
+        '''
+        params = [genre_name]
+        
+        if date:
+            count_query += ' AND a.release_date = ?'
+            params.append(date)
+        elif date_from and date_to:
+            count_query += ' AND a.release_date BETWEEN ? AND ?'
+            params.extend([date_from, date_to])
+        elif date_from:
+            count_query += ' AND a.release_date >= ?'
+            params.append(date_from)
+        elif date_to:
+            count_query += ' AND a.release_date <= ?'
+            params.append(date_to)
+        
+        cursor.execute(count_query, params)
+        total_count = cursor.fetchone()[0]
+        
+        return {
+            "albums": albums,
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "genre": genre_name,
+            "filters": {
+                "date": date,
+                "date_from": date_from,
+                "date_to": date_to
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching albums by genre {genre_name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch albums by genre")
+    finally:
+        db.close()
+
+@app.get("/api/genres/stats")
+async def get_genre_statistics():
+    """Get comprehensive genre statistics"""
+    try:
+        db = AlbumsDatabase()
+        db.connect()
+        
+        stats = db.get_genre_statistics()
+        
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Error fetching genre statistics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch genre statistics")
+    finally:
+        db.close()
+
+# ============================================================================
 # ADMIN ENDPOINTS
 # ============================================================================
 
@@ -380,6 +622,73 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         # Ingest into database
         ingest_json_files(db, json_filename)
         database_ingested = True  # Mark successful database ingestion
+        
+        # Parse genres for all albums
+        scraping_status["status_message"] = "Parsing genres..."
+        genre_parser = GenreParser()
+        
+        for album in albums:
+            # Check if album has band and band has genre attribute
+            if hasattr(album, 'band') and album.band and hasattr(album.band, 'genre') and album.band.genre and album.band.genre.strip():
+                try:
+                    logger.debug(f"Parsing genres for album {album.id}: {album.band.genre}")
+                    parsed_genres = genre_parser.parse_genre_string(album.band.genre)
+                    genre_data = []
+                    
+                    for parsed_genre in parsed_genres:
+                        # Add main genre
+                        if parsed_genre.main:
+                            genre_data.append({
+                                'genre_name': parsed_genre.main,
+                                'genre_type': 'main',
+                                'confidence': parsed_genre.confidence,
+                                'period': parsed_genre.period
+                            })
+                        
+                        # Add modifiers
+                        for modifier in parsed_genre.modifiers:
+                            genre_data.append({
+                                'genre_name': modifier,
+                                'genre_type': 'modifier',
+                                'confidence': parsed_genre.confidence * 0.8,
+                                'period': parsed_genre.period
+                            })
+                        
+                        # Add related genres
+                        for related in parsed_genre.related:
+                            genre_data.append({
+                                'genre_name': related,
+                                'genre_type': 'related',
+                                'confidence': parsed_genre.confidence * 0.7,
+                                'period': parsed_genre.period
+                            })
+                    
+                    # Insert parsed genres into database
+                    if genre_data:
+                        db.insert_parsed_genres(album.id, genre_data)
+                        
+                        # Update genre taxonomy
+                        for genre_item in genre_data:
+                            genre_name = genre_item['genre_name']
+                            normalized_name = genre_parser.normalize_genre(genre_name)
+                            category = 'base' if genre_item['genre_type'] == 'main' else genre_item['genre_type']
+                            
+                            db.upsert_genre_taxonomy(
+                                genre_name=genre_name,
+                                normalized_name=normalized_name,
+                                category=category
+                            )
+                
+                except Exception as e:
+                    logger.warning(f"Failed to parse genres for album {album.id}: {e}")
+            else:
+                # Log albums without genre information for debugging
+                if hasattr(album, 'id'):
+                    logger.debug(f"Album {album.id} has no genre information to parse")
+        
+        # Update genre statistics
+        db.update_genre_statistics()
+        logger.info(f"Genre parsing completed for {len(albums)} albums")
         
         scraping_status.update({
             "is_running": False,

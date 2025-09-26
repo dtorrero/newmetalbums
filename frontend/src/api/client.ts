@@ -1,7 +1,15 @@
 // API client for Metal Albums backend
 
 import axios from 'axios';
-import { DatesResponse, AlbumsResponse, SearchResponse, StatsResponse } from '../types';
+import { 
+  DatesResponse, 
+  AlbumsResponse, 
+  SearchResponse, 
+  StatsResponse,
+  GenreResponse,
+  GenreSearchResponse,
+  AlbumsWithGenresResponse
+} from '../types';
 
 // Get API base URL - in production (Docker), nginx proxies everything, so use relative URLs
 const API_BASE_URL = (process.env.NODE_ENV === 'production' || process.env.REACT_APP_API_URL === '')
@@ -73,6 +81,40 @@ export const api = {
   // Health check
   healthCheck: async (): Promise<{ status: string; message: string }> => {
     const response = await apiClient.get('/api/health');
+    return response.data;
+  },
+
+  // Genre-related endpoints
+  getGenres: async (params?: {
+    category?: string;
+    limit?: number;
+    include_stats?: boolean;
+  }): Promise<GenreResponse> => {
+    const response = await apiClient.get<GenreResponse>('/api/genres', { params });
+    return response.data;
+  },
+
+  searchGenres: async (query: string, limit?: number): Promise<GenreSearchResponse> => {
+    const response = await apiClient.get<GenreSearchResponse>('/api/genres/search', {
+      params: { q: query, limit }
+    });
+    return response.data;
+  },
+
+  getAlbumsByGenre: async (
+    genreName: string,
+    params?: {
+      date?: string;
+      date_from?: string;
+      date_to?: string;
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<AlbumsWithGenresResponse> => {
+    const response = await apiClient.get<AlbumsWithGenresResponse>(
+      `/api/albums/by-genre/${encodeURIComponent(genreName)}`,
+      { params }
+    );
     return response.data;
   },
 };

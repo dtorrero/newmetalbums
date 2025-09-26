@@ -69,3 +69,54 @@ export interface StatsResponse {
   top_countries: { country: string; count: number }[];
   recent_dates: { release_date: string; count: number }[];
 }
+
+// Genre-related types
+export interface ParsedGenre {
+  genre_name: string;
+  genre_type: 'main' | 'modifier' | 'related';
+  confidence: number;
+  period?: string;
+}
+
+export interface Genre {
+  id: number;
+  genre_name: string;
+  normalized_name: string;
+  parent_genre?: string;
+  genre_category: 'base' | 'modifier' | 'style';
+  aliases: string[];
+  color_hex?: string;
+  album_count: number;
+  created_at: string;
+}
+
+export interface GenreResponse {
+  genres: Genre[];
+  total: number;
+  category?: string;
+  include_stats: boolean;
+}
+
+export interface GenreSearchResponse {
+  genres: Genre[];
+  total: number;
+  query: string;
+  suggestions: string[];
+}
+
+export interface AlbumWithGenres extends Album {
+  parsed_genres?: ParsedGenre[];
+}
+
+export interface AlbumsWithGenresResponse {
+  albums: AlbumWithGenres[];
+  total: number;
+  limit: number;
+  offset: number;
+  genre: string;
+  filters: {
+    date?: string;
+    date_from?: string;
+    date_to?: string;
+  };
+}

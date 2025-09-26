@@ -1,0 +1,573 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Box,
+  Typography,
+  Card,
+  CardContent,
+  CardMedia,
+  Chip,
+  CircularProgress,
+  Alert,
+  Container,
+  Button,
+  IconButton,
+  Drawer,
+  Checkbox,
+  FormControlLabel,
+  FormGroup,
+  TextField,
+  InputAdornment,
+  useMediaQuery,
+  useTheme,
+  Fab,
+  Grid,
+  Skeleton,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Badge,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material';
+import {
+  ArrowBack,
+  OpenInNew,
+  LocationOn,
+  DateRange,
+  Album as AlbumIcon,
+  FilterList,
+  Search,
+  Clear,
+  ExpandMore,
+  Close,
+} from '@mui/icons-material';
+import { useParams, useNavigate } from 'react-router-dom';
+import { api } from '../api/client';
+import { AlbumWithGenres } from '../types';
+import { groupGenres, albumMatchesGenreGroups, GenreGroup, GenreHierarchy } from '../utils/genreGrouping';
+
+interface GenreFilter {
+  genre: string;
+  selected: boolean;
+  count: number;
+  color: string;
+}
+
+const EnhancedAlbumDisplay: React.FC = () => {
+  const { date } = useParams<{ date: string }>();
+  const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  
+  const [albums, setAlbums] = useState<AlbumWithGenres[]>([]);
+  const [filteredAlbums, setFilteredAlbums] = useState<AlbumWithGenres[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [genreHierarchy, setGenreHierarchy] = useState<GenreHierarchy | null>(null);
+  const [selectedGenreGroups, setSelectedGenreGroups] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [imageDialog, setImageDialog] = useState<{
+    open: boolean;
+    imageUrl: string;
+    albumName: string;
+    bandName: string;
+  }>({
+    open: false,
+    imageUrl: '',
+    albumName: '',
+    bandName: ''
+  });
+
+  // Generate color for genre
+  const generateGenreColor = (genre: string): string => {
+    const colors = ['#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3', '#00bcd4', '#009688', '#4caf50', '#ff9800'];
+    let hash = 0;
+    for (let i = 0; i < genre.length; i++) {
+      hash = genre.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+  };
+
+  // Fetch albums and build genre hierarchy
+  useEffect(() => {
+    const fetchAlbums = async () => {
+      if (!date) return;
+      
+      try {
+        setLoading(true);
+        const response = await api.getAlbumsByDate(date);
+        setAlbums(response.albums);
+        
+        // Build genre map from raw genre strings
+        const genreMap = new Map<string, number>();
+        response.albums.forEach(album => {
+          if (album.genre) {
+            const genres = album.genre.split(/[\/,;]/).map(g => g.trim());
+            genres.forEach(genre => {
+              if (genre) genreMap.set(genre, (genreMap.get(genre) || 0) + 1);
+            });
+          }
+        });
+
+        // Create smart genre hierarchy
+        const hierarchy = groupGenres(genreMap);
+        setGenreHierarchy(hierarchy);
+        setFilteredAlbums(response.albums);
+      } catch (err) {
+        setError('Failed to load albums for this date.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAlbums();
+  }, [date]);
+
+  // Filter albums using smart genre groups
+  const filterAlbums = useCallback(() => {
+    let filtered = albums;
+
+    // Filter by selected genre groups
+    if (selectedGenreGroups.length > 0) {
+      filtered = filtered.filter(album => {
+        if (!album.genre) return false;
+        return albumMatchesGenreGroups(album.genre, selectedGenreGroups);
+      });
+    }
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(album =>
+        album.album_name.toLowerCase().includes(query) ||
+        album.band_name.toLowerCase().includes(query) ||
+        (album.genre && album.genre.toLowerCase().includes(query))
+      );
+    }
+
+    setFilteredAlbums(filtered);
+  }, [albums, selectedGenreGroups, searchQuery]);
+
+  useEffect(() => {
+    filterAlbums();
+  }, [filterAlbums]);
+
+  const getCoverImageUrl = (album: AlbumWithGenres) => {
+    if (album.cover_path && album.cover_path !== 'N/A') {
+      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+      return `${baseUrl}/${album.cover_path}`;
+    }
+    return album.cover_art && album.cover_art !== 'N/A' ? album.cover_art : null;
+  };
+
+  const handleImageClick = (album: AlbumWithGenres) => {
+    const imageUrl = getCoverImageUrl(album);
+    if (imageUrl) {
+      setImageDialog({
+        open: true,
+        imageUrl,
+        albumName: album.album_name,
+        bandName: album.band_name
+      });
+    }
+  };
+
+  const handleCloseImageDialog = () => {
+    setImageDialog({
+      open: false,
+      imageUrl: '',
+      albumName: '',
+      bandName: ''
+    });
+  };
+
+  const selectedGenreCount = selectedGenreGroups.length;
+  const totalGenreGroups = genreHierarchy?.mainGenres.length || 0;
+
+  if (loading) {
+    return (
+      <Container maxWidth="xl">
+        <Box py={4}>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                sm: 'repeat(2, 1fr)',
+                md: 'repeat(3, 1fr)',
+                lg: 'repeat(4, 1fr)',
+              },
+              gap: 3,
+            }}
+          >
+            {[...Array(8)].map((_, index) => (
+              <Card key={index}>
+                <Skeleton variant="rectangular" height={200} />
+                <CardContent>
+                  <Skeleton variant="text" height={30} />
+                  <Skeleton variant="text" height={20} />
+                </CardContent>
+              </Card>
+            ))}
+          </Box>
+        </Box>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container maxWidth="xl">
+        <Box py={4}>
+          <Button startIcon={<ArrowBack />} onClick={() => navigate('/')} sx={{ mb: 2 }}>
+            Back to Dates
+          </Button>
+          <Alert severity="error">{error}</Alert>
+        </Box>
+      </Container>
+    );
+  }
+
+  return (
+    <Container maxWidth="xl">
+      <Box py={4}>
+        {/* Header */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Button startIcon={<ArrowBack />} onClick={() => navigate('/')} variant="outlined">
+            Back to Dates
+          </Button>
+          <Button
+            startIcon={<FilterList />}
+            onClick={() => setFilterDrawerOpen(true)}
+            variant="contained"
+            color="secondary"
+          >
+            Filter ({selectedGenreCount}/{totalGenreGroups})
+          </Button>
+        </Box>
+
+        <Typography variant="h4" component="h1" gutterBottom>
+          🤘 Albums Released on {date}
+        </Typography>
+        
+        <Typography variant="h6" color="text.secondary" sx={{ mb: 4 }}>
+          {filteredAlbums.length} of {albums.length} albums
+        </Typography>
+
+        {/* Albums Grid */}
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: 'repeat(2, 1fr)',
+              md: 'repeat(3, 1fr)',
+              lg: 'repeat(4, 1fr)',
+            },
+            gap: 3,
+          }}
+        >
+          {filteredAlbums.map((album) => (
+            <Card 
+              key={album.id}
+              elevation={3} 
+              sx={{ 
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                '&:hover': { transform: 'translateY(-4px)' }
+              }}
+            >
+                {/* Cover */}
+                <Box 
+                  sx={{ 
+                    position: 'relative', 
+                    paddingTop: '100%',
+                    cursor: getCoverImageUrl(album) ? 'pointer' : 'default',
+                    '&:hover': getCoverImageUrl(album) ? {
+                      '& .cover-overlay': {
+                        opacity: 1
+                      }
+                    } : {}
+                  }}
+                  onClick={() => handleImageClick(album)}
+                >
+                  {getCoverImageUrl(album) ? (
+                    <>
+                      <CardMedia
+                        component="img"
+                        sx={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                        }}
+                        image={getCoverImageUrl(album) || ''}
+                        alt={`${album.album_name} cover`}
+                      />
+                      <Box
+                        className="cover-overlay"
+                        sx={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: 0,
+                          transition: 'opacity 0.2s ease-in-out',
+                        }}
+                      >
+                        <Typography variant="body2" color="white" sx={{ fontWeight: 'bold' }}>
+                          Click to enlarge
+                        </Typography>
+                      </Box>
+                    </>
+                  ) : (
+                    <Box sx={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      bgcolor: 'grey.800',
+                    }}>
+                      <AlbumIcon sx={{ fontSize: 60, color: 'grey.500' }} />
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Details */}
+                <CardContent sx={{ flex: 1 }}>
+                  <Typography variant="h6" component="h3" gutterBottom noWrap>
+                    {album.album_name}
+                  </Typography>
+                  <Typography variant="subtitle2" color="primary" gutterBottom noWrap>
+                    {album.band_name}
+                  </Typography>
+
+                  {/* Genre chips */}
+                  {album.genre && (
+                    <Box display="flex" flexWrap="wrap" gap={0.5} mb={1}>
+                      {album.genre.split(/[\/,;]/).slice(0, 2).map((genre, index) => (
+                        <Chip
+                          key={index}
+                          label={genre.trim()}
+                          size="small"
+                          sx={{
+                            fontSize: '0.7rem',
+                            backgroundColor: generateGenreColor(genre.trim()),
+                            color: 'white',
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  )}
+
+                  <Box display="flex" gap={0.5} mb={2}>
+                    <Chip icon={<DateRange />} label={album.type} size="small" />
+                    {album.country_of_origin && (
+                      <Chip icon={<LocationOn />} label={album.country_of_origin} size="small" />
+                    )}
+                  </Box>
+
+                  {/* Links */}
+                  <Box display="flex" gap={1} flexWrap="wrap">
+                    {album.album_url && (
+                      <Button size="small" startIcon={<OpenInNew />} href={album.album_url} target="_blank">
+                        Metal Archives
+                      </Button>
+                    )}
+                    {album.bandcamp_url && album.bandcamp_url !== 'N/A' && (
+                      <Button 
+                        size="small" 
+                        startIcon={<OpenInNew />} 
+                        href={album.bandcamp_url} 
+                        target="_blank"
+                        color="secondary"
+                      >
+                        Bandcamp
+                      </Button>
+                    )}
+                  </Box>
+                </CardContent>
+              </Card>
+          ))}
+        </Box>
+
+        {/* Filter Drawer */}
+        <Drawer
+          anchor="right"
+          open={filterDrawerOpen}
+          onClose={() => setFilterDrawerOpen(false)}
+        >
+          <Box sx={{ width: 350, p: 3 }}>
+            <Typography variant="h6" mb={2}>Filter Albums</Typography>
+            
+            <TextField
+              fullWidth
+              placeholder="Search..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><Search /></InputAdornment>,
+              }}
+              sx={{ mb: 3 }}
+            />
+
+            <Typography variant="subtitle1" mb={2}>
+              Genre Groups ({selectedGenreCount}/{totalGenreGroups})
+            </Typography>
+
+            {genreHierarchy && (
+              <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
+                {/* Main Genre Groups */}
+                <Accordion defaultExpanded>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Typography variant="subtitle2">
+                      Main Genres ({genreHierarchy.mainGenres.length})
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <FormGroup>
+                      {genreHierarchy.mainGenres.map((group) => (
+                        <FormControlLabel
+                          key={group.name}
+                          control={
+                            <Checkbox
+                              checked={selectedGenreGroups.includes(group.name)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedGenreGroups(prev => [...prev, group.name]);
+                                } else {
+                                  setSelectedGenreGroups(prev => prev.filter(g => g !== group.name));
+                                }
+                              }}
+                            />
+                          }
+                          label={
+                            <Box display="flex" alignItems="center" gap={1}>
+                              <Badge
+                                badgeContent={group.count}
+                                color="primary"
+                                sx={{
+                                  '& .MuiBadge-badge': {
+                                    backgroundColor: group.color,
+                                    color: 'white'
+                                  }
+                                }}
+                              >
+                                <Typography variant="body2">{group.name}</Typography>
+                              </Badge>
+                              {group.subgenres.length > 1 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  (+{group.subgenres.length - 1} variants)
+                                </Typography>
+                              )}
+                            </Box>
+                          }
+                        />
+                      ))}
+                    </FormGroup>
+                  </AccordionDetails>
+                </Accordion>
+
+                {/* Quick Actions */}
+                <Box mt={2} display="flex" gap={1} flexWrap="wrap">
+                  <Button
+                    size="small"
+                    onClick={() => setSelectedGenreGroups([])}
+                    startIcon={<Clear />}
+                  >
+                    Clear All
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => setSelectedGenreGroups(genreHierarchy.mainGenres.map(g => g.name))}
+                  >
+                    Select All
+                  </Button>
+                </Box>
+              </Box>
+            )}
+          </Box>
+        </Drawer>
+
+        {/* Mobile Filter FAB */}
+        {isMobile && (
+          <Fab
+            color="secondary"
+            sx={{ position: 'fixed', bottom: 16, right: 16 }}
+            onClick={() => setFilterDrawerOpen(true)}
+          >
+            <FilterList />
+          </Fab>
+        )}
+
+        {/* Image Dialog */}
+        <Dialog
+          open={imageDialog.open}
+          onClose={handleCloseImageDialog}
+          maxWidth="md"
+          fullWidth
+          PaperProps={{
+            sx: {
+              backgroundColor: 'rgba(0, 0, 0, 0.9)',
+              backdropFilter: 'blur(10px)',
+            }
+          }}
+        >
+          <DialogTitle sx={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            color: 'white',
+            pb: 1
+          }}>
+            <Box>
+              <Typography variant="h6" component="div" noWrap>
+                {imageDialog.albumName}
+              </Typography>
+              <Typography variant="subtitle2" color="grey.300">
+                {imageDialog.bandName}
+              </Typography>
+            </Box>
+            <IconButton
+              onClick={handleCloseImageDialog}
+              sx={{ color: 'white' }}
+              size="large"
+            >
+              <Close />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0, display: 'flex', justifyContent: 'center' }}>
+            <Box
+              component="img"
+              src={imageDialog.imageUrl}
+              alt={`${imageDialog.albumName} cover`}
+              sx={{
+                maxWidth: '100%',
+                maxHeight: '70vh',
+                objectFit: 'contain',
+                cursor: 'pointer'
+              }}
+              onClick={handleCloseImageDialog}
+            />
+          </DialogContent>
+        </Dialog>
+      </Box>
+    </Container>
+  );
+};
+
+export default EnhancedAlbumDisplay;

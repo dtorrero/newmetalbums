@@ -75,11 +75,59 @@ class AlbumsDatabase:
             )
         ''')
         
+        # Parsed genres table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS parsed_genres (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                album_id TEXT NOT NULL,
+                genre_name TEXT NOT NULL,
+                genre_type TEXT NOT NULL, -- 'main', 'modifier', 'related'
+                confidence REAL NOT NULL,
+                period TEXT, -- 'early', 'mid', 'later', NULL
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (album_id) REFERENCES albums (album_id)
+            )
+        ''')
+        
+        # Genre taxonomy table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS genre_taxonomy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                genre_name TEXT UNIQUE NOT NULL,
+                normalized_name TEXT NOT NULL,
+                parent_genre TEXT,
+                genre_category TEXT, -- 'base', 'modifier', 'style'
+                aliases TEXT, -- JSON array of alternative names
+                color_hex TEXT, -- For UI theming
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Genre statistics table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS genre_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                genre_name TEXT NOT NULL,
+                album_count INTEGER NOT NULL,
+                date_range_start DATE,
+                date_range_end DATE,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Create indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_albums_release_date ON albums(release_date)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_albums_band_name ON albums(band_name)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_albums_genre ON albums(genre)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id)')
+        
+        # Create indexes for new genre tables
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_parsed_genres_album_id ON parsed_genres(album_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_parsed_genres_genre_name ON parsed_genres(genre_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_parsed_genres_genre_type ON parsed_genres(genre_type)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre_taxonomy_name ON genre_taxonomy(genre_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre_taxonomy_category ON genre_taxonomy(genre_category)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre_stats_name ON genre_stats(genre_name)')
         
         self.connection.commit()
         logger.info("Database tables created successfully")
@@ -303,6 +351,233 @@ class AlbumsDatabase:
         cursor = self.connection.cursor()
         cursor.execute("SELECT COUNT(*) as count FROM albums WHERE release_date = ?", (release_date,))
         return cursor.fetchone()['count']
+    
+    # Genre-related methods
+    
+    def insert_parsed_genres(self, album_id: str, parsed_genres: List[Dict[str, Any]]) -> bool:
+        """Insert parsed genres for an album"""
+        cursor = self.connection.cursor()
+        
+        try:
+            # Delete existing parsed genres for this album
+            cursor.execute('DELETE FROM parsed_genres WHERE album_id = ?', (album_id,))
+            
+            # Insert new parsed genres
+            for genre_data in parsed_genres:
+                cursor.execute('''
+                    INSERT INTO parsed_genres (album_id, genre_name, genre_type, confidence, period)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (
+                    album_id,
+                    genre_data.get('genre_name', ''),
+                    genre_data.get('genre_type', 'main'),
+                    genre_data.get('confidence', 1.0),
+                    genre_data.get('period')
+                ))
+            
+            self.connection.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error inserting parsed genres for album {album_id}: {e}")
+            self.connection.rollback()
+            return False
+    
+    def get_parsed_genres_by_album(self, album_id: str) -> List[Dict[str, Any]]:
+        """Get parsed genres for a specific album"""
+        cursor = self.connection.cursor()
+        cursor.execute('''
+            SELECT genre_name, genre_type, confidence, period
+            FROM parsed_genres 
+            WHERE album_id = ?
+            ORDER BY confidence DESC, genre_type
+        ''', (album_id,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_all_genres(self, category: str = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get all genres from taxonomy with optional filtering"""
+        cursor = self.connection.cursor()
+        
+        if category:
+            cursor.execute('''
+                SELECT gt.*, COALESCE(gs.album_count, 0) as album_count
+                FROM genre_taxonomy gt
+                LEFT JOIN genre_stats gs ON gt.genre_name = gs.genre_name
+                WHERE gt.genre_category = ?
+                ORDER BY gs.album_count DESC, gt.genre_name
+                LIMIT ?
+            ''', (category, limit))
+        else:
+            cursor.execute('''
+                SELECT gt.*, COALESCE(gs.album_count, 0) as album_count
+                FROM genre_taxonomy gt
+                LEFT JOIN genre_stats gs ON gt.genre_name = gs.genre_name
+                ORDER BY gs.album_count DESC, gt.genre_name
+                LIMIT ?
+            ''', (limit,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def search_genres(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search genres with fuzzy matching"""
+        cursor = self.connection.cursor()
+        
+        # Use LIKE for fuzzy matching
+        search_pattern = f"%{query}%"
+        cursor.execute('''
+            SELECT gt.*, COALESCE(gs.album_count, 0) as album_count
+            FROM genre_taxonomy gt
+            LEFT JOIN genre_stats gs ON gt.genre_name = gs.genre_name
+            WHERE gt.genre_name LIKE ? OR gt.normalized_name LIKE ? OR gt.aliases LIKE ?
+            ORDER BY 
+                CASE 
+                    WHEN gt.genre_name = ? THEN 1
+                    WHEN gt.genre_name LIKE ? THEN 2
+                    ELSE 3
+                END,
+                gs.album_count DESC
+            LIMIT ?
+        ''', (search_pattern, search_pattern, search_pattern, query, f"{query}%", limit))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_albums_by_genre(self, genre_name: str, date: str = None, date_from: str = None, 
+                           date_to: str = None, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+        """Get albums filtered by genre with optional date filtering"""
+        cursor = self.connection.cursor()
+        
+        # Build the query based on filters
+        base_query = '''
+            SELECT DISTINCT a.*
+            FROM albums a
+            JOIN parsed_genres pg ON a.album_id = pg.album_id
+            WHERE pg.genre_name = ?
+        '''
+        params = [genre_name]
+        
+        if date:
+            base_query += ' AND a.release_date = ?'
+            params.append(date)
+        elif date_from and date_to:
+            base_query += ' AND a.release_date BETWEEN ? AND ?'
+            params.extend([date_from, date_to])
+        elif date_from:
+            base_query += ' AND a.release_date >= ?'
+            params.append(date_from)
+        elif date_to:
+            base_query += ' AND a.release_date <= ?'
+            params.append(date_to)
+        
+        base_query += ' ORDER BY a.release_date DESC, a.band_name, a.album_name LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+        
+        cursor.execute(base_query, params)
+        albums = [dict(row) for row in cursor.fetchall()]
+        
+        # Add parsed genres for each album
+        for album in albums:
+            album['parsed_genres'] = self.get_parsed_genres_by_album(album['album_id'])
+        
+        return albums
+    
+    def get_genre_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive genre statistics"""
+        cursor = self.connection.cursor()
+        
+        # Total genre counts
+        cursor.execute('SELECT COUNT(*) as total FROM genre_taxonomy')
+        total_genres = cursor.fetchone()['total']
+        
+        cursor.execute('SELECT COUNT(DISTINCT genre_name) as total FROM parsed_genres')
+        total_parsed_genres = cursor.fetchone()['total']
+        
+        # Top genres
+        cursor.execute('''
+            SELECT gs.genre_name, gs.album_count
+            FROM genre_stats gs
+            ORDER BY gs.album_count DESC
+            LIMIT 10
+        ''')
+        top_genres = [dict(row) for row in cursor.fetchall()]
+        
+        # Genre distribution by type
+        cursor.execute('''
+            SELECT genre_type, COUNT(*) as count
+            FROM parsed_genres
+            GROUP BY genre_type
+        ''')
+        type_distribution = {row['genre_type']: row['count'] for row in cursor.fetchall()}
+        
+        # Temporal distribution
+        cursor.execute('''
+            SELECT period, COUNT(*) as count
+            FROM parsed_genres
+            WHERE period IS NOT NULL
+            GROUP BY period
+        ''')
+        temporal_distribution = {row['period']: row['count'] for row in cursor.fetchall()}
+        
+        return {
+            'total_genres': total_genres,
+            'total_parsed_genres': total_parsed_genres,
+            'top_genres': top_genres,
+            'type_distribution': type_distribution,
+            'temporal_distribution': temporal_distribution
+        }
+    
+    def upsert_genre_taxonomy(self, genre_name: str, normalized_name: str, 
+                             category: str, parent_genre: str = None, 
+                             aliases: List[str] = None, color_hex: str = None) -> bool:
+        """Insert or update genre taxonomy entry"""
+        cursor = self.connection.cursor()
+        
+        try:
+            aliases_json = json.dumps(aliases or [])
+            cursor.execute('''
+                INSERT OR REPLACE INTO genre_taxonomy 
+                (genre_name, normalized_name, parent_genre, genre_category, aliases, color_hex)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (genre_name, normalized_name, parent_genre, category, aliases_json, color_hex))
+            
+            self.connection.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error upserting genre taxonomy for {genre_name}: {e}")
+            self.connection.rollback()
+            return False
+    
+    def update_genre_statistics(self) -> bool:
+        """Update genre statistics table with current data"""
+        cursor = self.connection.cursor()
+        
+        try:
+            # Clear existing stats
+            cursor.execute('DELETE FROM genre_stats')
+            
+            # Calculate new stats
+            cursor.execute('''
+                INSERT INTO genre_stats (genre_name, album_count, date_range_start, date_range_end)
+                SELECT 
+                    pg.genre_name,
+                    COUNT(DISTINCT pg.album_id) as album_count,
+                    MIN(a.release_date) as date_range_start,
+                    MAX(a.release_date) as date_range_end
+                FROM parsed_genres pg
+                JOIN albums a ON pg.album_id = a.album_id
+                WHERE a.release_date IS NOT NULL AND a.release_date != ''
+                GROUP BY pg.genre_name
+            ''')
+            
+            self.connection.commit()
+            logger.info("Genre statistics updated successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating genre statistics: {e}")
+            self.connection.rollback()
+            return False
 
 def ingest_json_files(db: AlbumsDatabase, json_pattern: str = "data/albums_*.json"):
     """Ingest all JSON files matching pattern into database"""

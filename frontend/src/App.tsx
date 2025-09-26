@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
 import DateBrowser from './components/DateBrowser';
 import AlbumDisplay from './components/AlbumDisplay';
+import EnhancedAlbumDisplay from './components/EnhancedAlbumDisplay';
 import AdminPanel from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -71,7 +72,8 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<DateBrowser />} />
-          <Route path="/date/:date" element={<AlbumDisplay />} />
+          <Route path="/date/:date" element={<EnhancedAlbumDisplay />} />
+          <Route path="/date-old/:date" element={<AlbumDisplay />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route 
             path="/admin" 
