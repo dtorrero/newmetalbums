@@ -407,12 +407,53 @@ const EnhancedAlbumDisplay: React.FC = () => {
 
         {/* Filter Drawer */}
         <Drawer
-          anchor="right"
+          anchor={isMobile ? "bottom" : "right"}
           open={filterDrawerOpen}
           onClose={() => setFilterDrawerOpen(false)}
+          PaperProps={{
+            sx: {
+              ...(isMobile && {
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
+                maxHeight: '80vh',
+              })
+            }
+          }}
         >
-          <Box sx={{ width: 350, p: 3 }}>
-            <Typography variant="h6" mb={2}>Filter Albums</Typography>
+          <Box sx={{ 
+            width: isMobile ? '100vw' : 350, 
+            maxWidth: isMobile ? '100vw' : 350,
+            p: isMobile ? 2 : 3,
+            height: isMobile ? 'auto' : 'auto'
+          }}>
+            {/* Header with close button for mobile */}
+            <Box 
+              display="flex" 
+              justifyContent="space-between" 
+              alignItems="center" 
+              mb={2}
+              sx={{
+                ...(isMobile && {
+                  position: 'sticky',
+                  top: 0,
+                  backgroundColor: 'background.paper',
+                  zIndex: 1,
+                  pb: 1,
+                  borderBottom: 1,
+                  borderColor: 'divider'
+                })
+              }}
+            >
+              <Typography variant="h6">Filter Albums</Typography>
+              {isMobile && (
+                <IconButton 
+                  onClick={() => setFilterDrawerOpen(false)}
+                  size="small"
+                >
+                  <Close />
+                </IconButton>
+              )}
+            </Box>
             
             <TextField
               fullWidth
@@ -422,7 +463,15 @@ const EnhancedAlbumDisplay: React.FC = () => {
               InputProps={{
                 startAdornment: <InputAdornment position="start"><Search /></InputAdornment>,
               }}
-              sx={{ mb: 3 }}
+              sx={{ 
+                mb: 3,
+                ...(isMobile && {
+                  position: 'sticky',
+                  top: isMobile ? '60px' : 0,
+                  backgroundColor: 'background.paper',
+                  zIndex: 1
+                })
+              }}
             />
 
             <Typography variant="subtitle1" mb={2}>
@@ -430,7 +479,11 @@ const EnhancedAlbumDisplay: React.FC = () => {
             </Typography>
 
             {genreHierarchy && (
-              <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
+              <Box sx={{ 
+                maxHeight: isMobile ? '60vh' : 400, 
+                overflow: 'auto',
+                pb: isMobile ? 2 : 0
+              }}>
                 {/* Main Genre Groups */}
                 <Accordion defaultExpanded>
                   <AccordionSummary expandIcon={<ExpandMore />}>
@@ -483,17 +536,33 @@ const EnhancedAlbumDisplay: React.FC = () => {
                 </Accordion>
 
                 {/* Quick Actions */}
-                <Box mt={2} display="flex" gap={1} flexWrap="wrap">
+                <Box 
+                  mt={2} 
+                  display="flex" 
+                  gap={1} 
+                  flexWrap="wrap"
+                  sx={{
+                    position: isMobile ? 'sticky' : 'static',
+                    bottom: isMobile ? 0 : 'auto',
+                    backgroundColor: isMobile ? 'background.paper' : 'transparent',
+                    pt: isMobile ? 2 : 0,
+                    pb: isMobile ? 1 : 0,
+                    borderTop: isMobile ? 1 : 0,
+                    borderColor: 'divider'
+                  }}
+                >
                   <Button
-                    size="small"
+                    size={isMobile ? "medium" : "small"}
                     onClick={() => setSelectedGenreGroups([])}
                     startIcon={<Clear />}
+                    fullWidth={isMobile}
                   >
                     Clear All
                   </Button>
                   <Button
-                    size="small"
+                    size={isMobile ? "medium" : "small"}
                     onClick={() => setSelectedGenreGroups(genreHierarchy.mainGenres.map(g => g.name))}
+                    fullWidth={isMobile}
                   >
                     Select All
                   </Button>

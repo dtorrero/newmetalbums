@@ -1,5 +1,5 @@
 # Plans and tests (temporary files)
-*IMPROVEMENTS_PLAN.md
+*.md
 test_*.py
 *_test.py
 # Logs
