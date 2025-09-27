@@ -18,6 +18,7 @@ import { CalendarToday, Album, Settings } from '@mui/icons-material';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { DateInfo } from '../types';
+import { useAdminContext } from '../contexts/AdminContext';
 
 const DateBrowser: React.FC = () => {
   const [dates, setDates] = useState<DateInfo[]>([]);
@@ -26,6 +27,7 @@ const DateBrowser: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { showAdminButton } = useAdminContext();
 
   useEffect(() => {
     const fetchDates = async () => {
@@ -123,31 +125,34 @@ const DateBrowser: React.FC = () => {
           <Typography 
             variant={isMobile ? "h5" : "h4"} 
             component="h1" 
-            align={isMobile ? "center" : "left"}
+            align={showAdminButton ? (isMobile ? "center" : "left") : "center"}
             sx={{ 
               fontWeight: 'bold',
               color: 'primary.main',
-              order: isMobile ? 2 : 1
+              order: showAdminButton ? (isMobile ? 2 : 1) : 1,
+              width: showAdminButton ? 'auto' : '100%'
             }}
           >
             🤘 Browse new metal album releases by date
           </Typography>
-          <Button
-            component={Link}
-            to="/admin"
-            startIcon={!isMobile ? <Settings /> : undefined}
-            variant="outlined"
-            color="secondary"
-            size={isMobile ? "small" : "medium"}
-            sx={{
-              order: isMobile ? 1 : 2,
-              alignSelf: isMobile ? 'flex-end' : 'auto',
-              minWidth: isMobile ? 'auto' : undefined,
-              px: isMobile ? 1.5 : 2
-            }}
-          >
-            {isMobile ? <Settings /> : 'Admin'}
-          </Button>
+          {showAdminButton && (
+            <Button
+              component={Link}
+              to="/admin"
+              startIcon={!isMobile ? <Settings /> : undefined}
+              variant="outlined"
+              color="secondary"
+              size={isMobile ? "small" : "medium"}
+              sx={{
+                order: isMobile ? 1 : 2,
+                alignSelf: isMobile ? 'flex-end' : 'auto',
+                minWidth: isMobile ? 'auto' : undefined,
+                px: isMobile ? 1.5 : 2
+              }}
+            >
+              {isMobile ? <Settings /> : 'Admin'}
+            </Button>
+          )}
         </Box>
 
         {dates.length === 0 ? (

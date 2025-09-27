@@ -19,6 +19,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { checkAuthStatus, setupPassword, login, isAuthenticated, AuthStatus } from '../utils/auth';
+import { useAdminContext } from '../contexts/AdminContext';
 
 const AdminLogin: React.FC = () => {
   const [password, setPassword] = useState('');
@@ -29,6 +30,7 @@ const AdminLogin: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const navigate = useNavigate();
+  const { refreshAdminStatus } = useAdminContext();
 
   useEffect(() => {
     // Check if already authenticated
@@ -61,6 +63,8 @@ const AdminLogin: React.FC = () => {
       const response = await setupPassword(password);
       if (response.success) {
         setSuccess('Admin password set successfully! Redirecting...');
+        // Refresh admin status to update button visibility
+        await refreshAdminStatus();
         setTimeout(() => navigate('/admin'), 1500);
       } else {
         setError(response.message || 'Setup failed');
@@ -86,6 +90,8 @@ const AdminLogin: React.FC = () => {
       const response = await login(password, rememberMe);
       if (response.success) {
         setSuccess('Login successful! Redirecting...');
+        // Refresh admin status to update button visibility
+        await refreshAdminStatus();
         setTimeout(() => navigate('/admin'), 1000);
       } else {
         setError(response.message || 'Login failed');

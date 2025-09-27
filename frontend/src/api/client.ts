@@ -11,6 +11,29 @@ import {
   AlbumsWithGenresResponse
 } from '../types';
 
+// Auth-related types
+export interface AuthStatus {
+  setup_required: boolean;
+  locked: boolean;
+  last_login: string | null;
+  created_at?: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  token?: string;
+  message: string;
+}
+
+export interface LoginRequest {
+  password: string;
+  remember_me?: boolean;
+}
+
+export interface SetupRequest {
+  password: string;
+}
+
 // Get API base URL - in production (Docker), nginx proxies everything, so use relative URLs
 const API_BASE_URL = (process.env.NODE_ENV === 'production' || process.env.REACT_APP_API_URL === '')
   ? '' // Use relative URLs - nginx will proxy to backend
@@ -115,6 +138,29 @@ export const api = {
       `/api/albums/by-genre/${encodeURIComponent(genreName)}`,
       { params }
     );
+    return response.data;
+  },
+
+  // Authentication endpoints
+  getAuthStatus: async (): Promise<AuthStatus> => {
+    const response = await apiClient.get<AuthStatus>('/api/auth/status');
+    return response.data;
+  },
+
+  setupAdmin: async (password: string): Promise<AuthResponse> => {
+    const response = await apiClient.post<AuthResponse>('/api/auth/setup', { password });
+    return response.data;
+  },
+
+  login: async (password: string, remember_me: boolean = false): Promise<AuthResponse> => {
+    const response = await apiClient.post<AuthResponse>('/api/auth/login', { password, remember_me });
+    return response.data;
+  },
+
+  verifyToken: async (token: string): Promise<{ valid: boolean; message: string }> => {
+    const response = await apiClient.post('/api/auth/verify', {}, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     return response.data;
   },
 };

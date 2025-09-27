@@ -8,6 +8,7 @@ import EnhancedAlbumDisplay from './components/EnhancedAlbumDisplay';
 import AdminPanel from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import ProtectedRoute from './components/ProtectedRoute';
+import { AdminProvider } from './contexts/AdminContext';
 
 // Create a dark theme for the metal aesthetic
 const theme = createTheme({
@@ -69,22 +70,24 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
-        <Routes>
-          <Route path="/" element={<DateBrowser />} />
-          <Route path="/date/:date" element={<EnhancedAlbumDisplay />} />
-          <Route path="/date-old/:date" element={<AlbumDisplay />} />
-          <Route path="/admin/login" element={<AdminLogin />} />
-          <Route 
-            path="/admin" 
-            element={
-              <ProtectedRoute>
-                <AdminPanel />
-              </ProtectedRoute>
-            } 
-          />
-        </Routes>
-      </Router>
+      <AdminProvider>
+        <Router>
+          <Routes>
+            <Route path="/" element={<DateBrowser />} />
+            <Route path="/date/:date" element={<EnhancedAlbumDisplay />} />
+            <Route path="/date-old/:date" element={<AlbumDisplay />} />
+            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route 
+              path="/admin" 
+              element={
+                <ProtectedRoute>
+                  <AdminPanel />
+                </ProtectedRoute>
+              } 
+            />
+          </Routes>
+        </Router>
+      </AdminProvider>
     </ThemeProvider>
   );
 }
