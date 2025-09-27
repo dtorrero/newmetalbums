@@ -18,55 +18,65 @@ export interface GenreHierarchy {
   totalAlbums: number;
 }
 
-// Base metal genres with their common variations and subgenres
+// Base metal genres with their core identifiers and variations
 const GENRE_HIERARCHY = {
-  'Black Metal': {
-    keywords: ['black', 'blackened', 'blackgaze', 'atmospheric black', 'symphonic black', 'melodic black', 'raw black', 'depressive black'],
-    priority: 10,
-    color: '#1a1a1a'
-  },
   'Death Metal': {
-    keywords: ['death', 'brutal death', 'technical death', 'melodic death', 'progressive death', 'old school death', 'blackened death'],
-    priority: 9,
+    coreWords: ['death'],
+    variations: ['brutal death', 'technical death', 'melodic death', 'progressive death', 'old school death', 'blackened death'],
+    priority: 10,
     color: '#8B0000'
   },
+  'Black Metal': {
+    coreWords: ['black'],
+    variations: ['atmospheric black', 'symphonic black', 'melodic black', 'raw black', 'depressive black', 'post-black', 'pagan black'],
+    priority: 9,
+    color: '#1a1a1a'
+  },
   'Thrash Metal': {
-    keywords: ['thrash', 'crossover thrash', 'blackened thrash', 'technical thrash', 'groove thrash'],
+    coreWords: ['thrash'],
+    variations: ['crossover thrash', 'blackened thrash', 'technical thrash', 'groove thrash', 'speed thrash'],
     priority: 8,
     color: '#FF4500'
   },
-  'Heavy Metal': {
-    keywords: ['heavy', 'traditional heavy', 'classic heavy', 'nwobhm', 'speed metal'],
+  'Progressive Metal': {
+    coreWords: ['progressive', 'prog'],
+    variations: ['djent', 'post-metal', 'experimental metal', 'technical progressive', 'progressive metal'],
     priority: 7,
-    color: '#4169E1'
+    color: '#9370DB'
   },
   'Doom Metal': {
-    keywords: ['doom', 'sludge', 'stoner', 'funeral doom', 'epic doom', 'traditional doom', 'atmospheric doom'],
+    coreWords: ['doom'],
+    variations: ['sludge', 'stoner', 'funeral doom', 'epic doom', 'traditional doom', 'atmospheric doom', 'drone'],
     priority: 6,
     color: '#2F4F4F'
   },
-  'Power Metal': {
-    keywords: ['power', 'symphonic power', 'melodic power', 'epic power', 'progressive power'],
+  'Heavy Metal': {
+    coreWords: ['heavy'],
+    variations: ['traditional heavy', 'classic heavy', 'nwobhm', 'speed metal', 'classic metal'],
     priority: 5,
+    color: '#4169E1'
+  },
+  'Power Metal': {
+    coreWords: ['power'],
+    variations: ['symphonic power', 'melodic power', 'epic power', 'progressive power', 'speed power'],
+    priority: 4,
     color: '#FFD700'
   },
-  'Progressive Metal': {
-    keywords: ['progressive', 'prog', 'technical', 'djent', 'post-metal', 'experimental'],
-    priority: 4,
-    color: '#9370DB'
-  },
   'Folk Metal': {
-    keywords: ['folk', 'pagan', 'viking', 'celtic', 'medieval', 'acoustic'],
+    coreWords: ['folk', 'pagan', 'viking'],
+    variations: ['celtic metal', 'medieval metal', 'acoustic folk'],
     priority: 3,
     color: '#228B22'
   },
   'Symphonic Metal': {
-    keywords: ['symphonic', 'orchestral', 'operatic', 'gothic symphonic'],
+    coreWords: ['symphonic', 'orchestral'],
+    variations: ['operatic metal', 'cinematic metal'],
     priority: 2,
     color: '#DC143C'
   },
   'Gothic Metal': {
-    keywords: ['gothic', 'darkwave', 'dark metal', 'atmospheric gothic'],
+    coreWords: ['gothic'],
+    variations: ['darkwave metal', 'dark metal', 'atmospheric gothic'],
     priority: 1,
     color: '#800080'
   }
@@ -89,32 +99,102 @@ function normalizeGenre(genre: string): string {
 }
 
 /**
- * Check if a genre matches a main category
+ * Extract the primary metal genre from a complex genre string
+ * Uses hierarchical priority to determine the main classification
  */
-function matchesCategory(genre: string, category: string, keywords: string[]): boolean {
-  const normalizedGenre = normalizeGenre(genre);
-  const normalizedCategory = normalizeGenre(category);
+export function extractPrimaryGenre(genre: string): string | null {
+  if (!genre) return null;
   
-  // Direct match
-  if (normalizedGenre.includes(normalizedCategory)) {
-    return true;
+  const normalizedGenre = normalizeGenre(genre);
+  const words = normalizedGenre.split(/\s+/);
+  
+  // Check for exact core word matches with word boundaries
+  for (const [categoryName, config] of Object.entries(GENRE_HIERARCHY)) {
+    // Check core words with word boundaries
+    for (const coreWord of config.coreWords) {
+      const regex = new RegExp(`\\b${normalizeGenre(coreWord)}\\b`);
+      if (regex.test(normalizedGenre)) {
+        // Make sure it's actually metal (contains 'metal' or is a known metal term)
+        if (normalizedGenre.includes('metal') || 
+            ['death', 'black', 'thrash', 'doom', 'power', 'folk', 'gothic', 'symphonic'].includes(coreWord)) {
+          return categoryName;
+        }
+      }
+    }
+    
+    // Check variations for exact matches
+    for (const variation of config.variations) {
+      if (normalizedGenre === normalizeGenre(variation)) {
+        return categoryName;
+      }
+    }
   }
   
-  // Keyword match
-  return keywords.some(keyword => 
-    normalizedGenre.includes(normalizeGenre(keyword))
-  );
+  // Handle single word cases (e.g., "Death" -> "Death Metal")
+  for (const [categoryName, config] of Object.entries(GENRE_HIERARCHY)) {
+    for (const coreWord of config.coreWords) {
+      if (normalizedGenre === normalizeGenre(coreWord)) {
+        return categoryName;
+      }
+    }
+  }
+  
+  return null;
 }
 
 /**
- * Extract modifiers from genre string
+ * Extract modifiers from a genre string (excluding the primary genre)
  */
-function extractModifiers(genre: string): string[] {
+export function extractModifiers(genre: string): string[] {
+  if (!genre) return [];
+  
   const normalizedGenre = normalizeGenre(genre);
-  return COMMON_MODIFIERS.filter(modifier => 
-    normalizedGenre.includes(modifier)
-  );
+  const primaryGenre = extractPrimaryGenre(genre);
+  
+  if (!primaryGenre) return [];
+  
+  const config = GENRE_HIERARCHY[primaryGenre as keyof typeof GENRE_HIERARCHY];
+  if (!config) return [];
+  
+  // Remove primary genre words from the string
+  let modifiedGenre = normalizedGenre;
+  for (const coreWord of config.coreWords) {
+    const regex = new RegExp(`\\b${normalizeGenre(coreWord)}\\b`, 'g');
+    modifiedGenre = modifiedGenre.replace(regex, '');
+  }
+  modifiedGenre = modifiedGenre.replace(/\bmetal\b/g, '').trim();
+  
+  // Extract remaining meaningful words as modifiers
+  const words = modifiedGenre.split(/\s+/).filter(word => word.length > 2);
+  const modifiers = words.filter(word => 
+    COMMON_MODIFIERS.includes(word) || 
+    /^(atmospheric|symphonic|technical|brutal|melodic|progressive|experimental|ambient|industrial|electronic|acoustic|instrumental)$/.test(word)
+  ).map(word => {
+    // Capitalize first letter for consistency
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  });
+  
+  return Array.from(new Set(modifiers)); // Remove duplicates
 }
+
+/**
+ * Improved category matching using hierarchical priority
+ */
+export function matchesCategoryImproved(genre: string, category: string): boolean {
+  if (!genre || !category) return false;
+  
+  const primaryGenre = extractPrimaryGenre(genre);
+  return primaryGenre === category;
+}
+
+/**
+ * Legacy function for backward compatibility (deprecated)
+ * @deprecated Use matchesCategoryImproved instead
+ */
+function matchesCategory(genre: string, category: string, keywords: string[]): boolean {
+  return matchesCategoryImproved(genre, category);
+}
+
 
 /**
  * Group genres into hierarchical structure
@@ -135,20 +215,18 @@ export function groupGenres(genreMap: Map<string, number>): GenreHierarchy {
     });
   });
   
-  // Categorize each genre
+  // Categorize each genre using improved hierarchical matching
   genreMap.forEach((count, genre) => {
     let categorized = false;
     
-    // Try to match with main categories
-    for (const [categoryName, config] of Object.entries(GENRE_HIERARCHY)) {
-      if (matchesCategory(genre, categoryName, config.keywords)) {
-        const group = mainGenres.find(g => g.name === categoryName);
-        if (group) {
-          group.count += count;
-          group.subgenres.push(genre);
-          categorized = true;
-          break;
-        }
+    // Use improved primary genre detection
+    const primaryGenre = extractPrimaryGenre(genre);
+    if (primaryGenre) {
+      const group = mainGenres.find(g => g.name === primaryGenre);
+      if (group) {
+        group.count += count;
+        group.subgenres.push(genre);
+        categorized = true;
       }
     }
     
@@ -215,7 +293,7 @@ function generateGenreColor(genre: string): string {
 }
 
 /**
- * Check if an album matches selected genre groups
+ * Check if an album matches selected genre groups using improved matching
  */
 export function albumMatchesGenreGroups(
   albumGenre: string, 
@@ -226,11 +304,11 @@ export function albumMatchesGenreGroups(
   const albumGenres = albumGenre.split(/[\/,;]/).map(g => g.trim());
   
   return selectedGroups.some(groupName => {
-    // Check if it's a main category
+    // Check if it's a main category using improved matching
     const categoryConfig = GENRE_HIERARCHY[groupName as keyof typeof GENRE_HIERARCHY];
     if (categoryConfig) {
       return albumGenres.some(genre => 
-        matchesCategory(genre, groupName, categoryConfig.keywords)
+        matchesCategoryImproved(genre, groupName)
       );
     }
     
