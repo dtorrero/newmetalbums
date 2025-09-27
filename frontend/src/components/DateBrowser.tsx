@@ -11,6 +11,8 @@ import {
   Container,
   Button,
   Fab,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import { CalendarToday, Album, Settings } from '@mui/icons-material';
 import { useNavigate, Link } from 'react-router-dom';
@@ -22,6 +24,8 @@ const DateBrowser: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   useEffect(() => {
     const fetchDates = async () => {
@@ -45,15 +49,25 @@ const DateBrowser: React.FC = () => {
     navigate(`/date/${date}`);
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string, mobile: boolean = false) => {
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
+      if (mobile) {
+        // Mobile: Short numeric format (e.g., "Sep 26, 2025")
+        return date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        });
+      } else {
+        // Desktop: Full format (e.g., "Friday, September 26, 2025")
+        return date.toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+      }
     } catch {
       return dateString;
     }
@@ -97,24 +111,44 @@ const DateBrowser: React.FC = () => {
 
   return (
     <Container maxWidth="lg">
-      <Box py={4}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h3" component="h1">
-            🤘 Metal Albums Database
+      <Box py={isMobile ? 2 : 4}>
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          mb: 3,
+          flexDirection: isMobile ? 'column' : 'row',
+          gap: isMobile ? 2 : 0
+        }}>
+          <Typography 
+            variant={isMobile ? "h5" : "h4"} 
+            component="h1" 
+            align={isMobile ? "center" : "left"}
+            sx={{ 
+              fontWeight: 'bold',
+              color: 'primary.main',
+              order: isMobile ? 2 : 1
+            }}
+          >
+            🤘 Browse new metal album releases by date
           </Typography>
           <Button
             component={Link}
             to="/admin"
-            startIcon={<Settings />}
+            startIcon={!isMobile ? <Settings /> : undefined}
             variant="outlined"
             color="secondary"
+            size={isMobile ? "small" : "medium"}
+            sx={{
+              order: isMobile ? 1 : 2,
+              alignSelf: isMobile ? 'flex-end' : 'auto',
+              minWidth: isMobile ? 'auto' : undefined,
+              px: isMobile ? 1.5 : 2
+            }}
           >
-            Admin
+            {isMobile ? <Settings /> : 'Admin'}
           </Button>
         </Box>
-        <Typography variant="h6" color="text.secondary" align="center" sx={{ mb: 4 }}>
-          Browse new metal album releases by date
-        </Typography>
 
         {dates.length === 0 ? (
           <Alert severity="info">
@@ -128,7 +162,7 @@ const DateBrowser: React.FC = () => {
               sm: 'repeat(2, 1fr)',
               md: 'repeat(3, 1fr)',
             }}
-            gap={3}
+            gap={isMobile ? 2 : 3}
           >
             {dates.map((dateInfo) => (
               <Card
@@ -150,8 +184,16 @@ const DateBrowser: React.FC = () => {
                   <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                     <Box display="flex" alignItems="center" mb={2}>
                       <CalendarToday color="primary" sx={{ mr: 1 }} />
-                      <Typography variant="h6" component="h2" noWrap>
-                        {formatDate(dateInfo.release_date)}
+                      <Typography 
+                        variant={isMobile ? "subtitle1" : "h6"} 
+                        component="h2" 
+                        sx={{
+                          fontWeight: 'bold',
+                          fontSize: isMobile ? '1rem' : '1.25rem',
+                          lineHeight: 1.2
+                        }}
+                      >
+                        {formatDate(dateInfo.release_date, isMobile)}
                       </Typography>
                     </Box>
 
