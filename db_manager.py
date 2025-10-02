@@ -51,6 +51,12 @@ class AlbumsDatabase:
                 cover_art TEXT,
                 cover_path TEXT,
                 bandcamp_url TEXT,
+                youtube_url TEXT,
+                spotify_url TEXT,
+                discogs_url TEXT,
+                lastfm_url TEXT,
+                soundcloud_url TEXT,
+                tidal_url TEXT,
                 country_of_origin TEXT,
                 location TEXT,
                 genre TEXT,
@@ -154,9 +160,10 @@ class AlbumsDatabase:
                 INSERT OR REPLACE INTO albums (
                     album_id, album_name, album_url, band_name, band_id, band_url,
                     release_date, release_date_raw, type, cover_art, cover_path,
-                    bandcamp_url, country_of_origin, location, genre, themes,
+                    bandcamp_url, youtube_url, spotify_url, discogs_url, lastfm_url,
+                    soundcloud_url, tidal_url, country_of_origin, location, genre, themes,
                     current_label, years_active, details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 album_data.get('album_id', ''),
                 album_data.get('album_name', ''),
@@ -170,6 +177,12 @@ class AlbumsDatabase:
                 album_data.get('cover_art', ''),
                 album_data.get('cover_path', ''),
                 album_data.get('bandcamp_url', ''),
+                album_data.get('youtube_url', ''),
+                album_data.get('spotify_url', ''),
+                album_data.get('discogs_url', ''),
+                album_data.get('lastfm_url', ''),
+                album_data.get('soundcloud_url', ''),
+                album_data.get('tidal_url', ''),
                 country_of_origin,
                 location,
                 genre,

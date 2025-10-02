@@ -2,6 +2,7 @@
 *.md
 test_*.py
 *_test.py
+IMPROVEMENTS_PLAN.txt
 # Logs
 logs
 *.log
@@ -232,3 +233,6 @@ frontend/yarn-error.log*
 # Plan files (keep locally, exclude from repo)
 *plan*.md
 *_plan.md
+
+# SSL configuration script
+mycfg

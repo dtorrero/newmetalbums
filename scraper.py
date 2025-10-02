@@ -453,6 +453,12 @@ class MetalArchivesScraper:
                 'cover_art': None,
                 'cover_path': None,
                 'bandcamp_url': None,
+                'youtube_url': None,
+                'spotify_url': None,
+                'discogs_url': None,
+                'lastfm_url': None,
+                'soundcloud_url': None,
+                'tidal_url': None,
                 'tracklist': [],
                 'details': {}
             }
@@ -604,10 +610,9 @@ class MetalArchivesScraper:
                 band_details = await self._extract_band_details(album['band_url'])
                 album.update(band_details)
                 
-                # Extract Bandcamp link
-                bandcamp_url = await self._extract_bandcamp_link(album['band_url'])
-                if bandcamp_url:
-                    album['bandcamp_url'] = bandcamp_url
+                # Extract platform links (Bandcamp, YouTube, Spotify, etc.)
+                platform_links = await self._extract_platform_links(album['band_url'])
+                album.update(platform_links)
             
         except Exception as e:
             logger.error(f"Error enriching album data for {album['album_name']}: {str(e)}")
@@ -775,21 +780,30 @@ class MetalArchivesScraper:
             
             logger.debug(f"Extracted band details: {band_details}")
             return band_details or {}
-            
         except Exception as e:
-            logger.error(f"Error extracting band details from {band_url}: {str(e)}")
+            logger.error(f"Error extracting band details: {str(e)}")
             return {}
 
-    async def _extract_bandcamp_link(self, band_url: str) -> Optional[str]:
-        """Extract Bandcamp link from band page Related Links AJAX endpoint."""
+    async def _extract_platform_links(self, band_url: str) -> Dict[str, Optional[str]]:
+        """Extract platform links (Bandcamp, YouTube, Spotify, etc.) from band's Related Links page."""
+        result = {}
+        
+        # Check if link extraction is enabled
+        if not config.LINK_EXTRACTION.get('enabled', True):
+            logger.debug("Link extraction is disabled in config")
+            return result
+        
         try:
-            logger.debug(f"Extracting Bandcamp link from: {band_url}")
-            
             # Extract band ID from URL
-            band_id = self._extract_id_from_url(band_url, BAND_ID_PATTERN)
+            band_id_match = re.search(r'/bands/[^/]+/(\d+)', band_url)
+            if not band_id_match:
+                logger.warning(f"Could not extract band ID from: {band_url}")
+                return result
+            
+            band_id = band_id_match.group(1)
             if not band_id:
                 logger.warning(f"Could not extract band ID from: {band_url}")
-                return None
+                return result
             
             # Construct Related Links AJAX URL
             links_url = f"https://www.metal-archives.com/link/ajax-list/type/band/id/{band_id}"
@@ -799,41 +813,55 @@ class MetalArchivesScraper:
             content = await self._navigate_to_url(links_url)
             if not content:
                 logger.warning(f"Failed to load Related Links: {links_url}")
-                return None
+                return result
             
-            # Extract Bandcamp URL from the AJAX response
-            bandcamp_url = await self.page.evaluate('''() => {
-                console.log('Searching for Bandcamp links in AJAX response...');
-                
-                // Look for any bandcamp.com links
-                const bandcampLinks = document.querySelectorAll('a[href*="bandcamp.com"]');
-                console.log('Found', bandcampLinks.length, 'bandcamp.com links');
-                
-                if (bandcampLinks.length > 0) {
-                    const link = bandcampLinks[0];
-                    console.log('Found Bandcamp link:', link.href, 'Text:', link.textContent);
-                    return link.href;
-                }
-                
-                return null;
-            }''')
+            # Get enabled platforms from config
+            platforms = config.LINK_EXTRACTION.get('platforms', {})
+            enabled_platforms = {
+                name: info for name, info in platforms.items() 
+                if info.get('enabled', True)
+            }
             
-            if bandcamp_url:
-                logger.info(f"Found Bandcamp link: {bandcamp_url}")
-                return bandcamp_url
-            else:
-                logger.debug("No Bandcamp link found in Related Links")
-                return None
+            # Extract links for all enabled platforms
+            for platform_name, platform_info in enabled_platforms.items():
+                patterns = platform_info.get('patterns', [])
+                if not patterns:
+                    continue
+                
+                # Build JavaScript selector for this platform's patterns
+                patterns_js = ', '.join([f'"a[href*=\\"{pattern}\\"]"' for pattern in patterns])
+                
+                # Extract URL for this platform
+                platform_url = await self.page.evaluate(f'''() => {{
+                    const selectors = [{patterns_js}];
+                    for (let selector of selectors) {{
+                        const links = document.querySelectorAll(selector);
+                        if (links.length > 0) {{
+                            return links[0].href;
+                        }}
+                    }}
+                    return null;
+                }}''')
+                
+                if platform_url:
+                    # Use field_name if specified (for backward compatibility), otherwise use platform_name + '_url'
+                    field_name = platform_info.get('field_name', f'{platform_name}_url')
+                    result[field_name] = platform_url
+                    logger.info(f"Found {platform_name} link: {platform_url}")
+                else:
+                    logger.debug(f"No {platform_name} link found in Related Links")
+            
+            return result
                 
         except Exception as e:
-            logger.error(f"Error extracting Bandcamp link: {str(e)}")
-            return None
+            logger.error(f"Error extracting platform links: {str(e)}")
+            return result
 
     async def download_cover(self, album: Dict, covers_dir: Path = None) -> Optional[str]:
         """Download album cover art."""
         if not album.get('cover_art'):
             return None
-            
+        
         if covers_dir is None:
             covers_dir = config.COVERS_DIR
             

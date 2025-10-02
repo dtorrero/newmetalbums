@@ -54,3 +54,46 @@ CLOUDFLARE_RETRIES = 3  # Number of times to retry Cloudflare challenge
 
 # Debug mode (set to True for more verbose output)
 DEBUG = True
+
+# Link extraction settings
+LINK_EXTRACTION = {
+    'enabled': True,
+    'platforms': {
+        'bandcamp': {
+            'enabled': True,
+            'priority': 1,
+            'patterns': ['bandcamp.com'],
+            'field_name': 'bandcamp_url'  # For backward compatibility
+        },
+        'youtube': {
+            'enabled': True,
+            'priority': 2,
+            'patterns': ['youtube.com', 'youtu.be']
+        },
+        'spotify': {
+            'enabled': True,
+            'priority': 3,
+            'patterns': ['spotify.com', 'open.spotify.com']
+        },
+        'discogs': {
+            'enabled': True,
+            'priority': 4,
+            'patterns': ['discogs.com']
+        },
+        'lastfm': {
+            'enabled': True,
+            'priority': 5,
+            'patterns': ['last.fm', 'lastfm.com', 'www.last.fm']
+        },
+        'soundcloud': {
+            'enabled': True,
+            'priority': 6,
+            'patterns': ['soundcloud.com']
+        },
+        'tidal': {
+            'enabled': True,
+            'priority': 7,
+            'patterns': ['tidal.com', 'listen.tidal.com']
+        }
+    }
+}

@@ -32,7 +32,13 @@ class Album(BaseModel):
     type: str = ""
     cover_art: Optional[str] = None
     cover_path: Optional[str] = None
-    bandcamp_url: Optional[str] = None
+    bandcamp_url: Optional[str] = None  # Kept for backward compatibility
+    youtube_url: Optional[str] = None
+    spotify_url: Optional[str] = None
+    discogs_url: Optional[str] = None
+    lastfm_url: Optional[str] = None
+    soundcloud_url: Optional[str] = None
+    tidal_url: Optional[str] = None
     tracklist: List[Track] = []
     details: Dict[str, Any] = {}
     
@@ -73,6 +79,12 @@ class Album(BaseModel):
             cover_art=data.get('cover_art'),
             cover_path=data.get('cover_path'),
             bandcamp_url=data.get('bandcamp_url'),
+            youtube_url=data.get('youtube_url'),
+            spotify_url=data.get('spotify_url'),
+            discogs_url=data.get('discogs_url'),
+            lastfm_url=data.get('lastfm_url'),
+            soundcloud_url=data.get('soundcloud_url'),
+            tidal_url=data.get('tidal_url'),
             tracklist=tracks,
             details=data.get('details', {})
         )
