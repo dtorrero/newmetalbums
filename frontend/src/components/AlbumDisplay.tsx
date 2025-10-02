@@ -32,6 +32,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { Album } from '../types';
+import PlatformLinks from './PlatformLinks';
 
 const AlbumDisplay: React.FC = () => {
   const { date } = useParams<{ date: string }>();
@@ -303,10 +304,7 @@ const AlbumDisplay: React.FC = () => {
                       )}
 
                       {/* Links */}
-                      <Box display="flex" gap={1} flexWrap="wrap" sx={{
-                        justifyContent: { xs: 'center', md: 'flex-start' },
-                        pb: { xs: 2, md: 0 }
-                      }}>
+                      <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                         {album.album_url && (
                           <Button
                             size="small"
@@ -314,22 +312,12 @@ const AlbumDisplay: React.FC = () => {
                             href={album.album_url}
                             target="_blank"
                             rel="noopener noreferrer"
+                            variant="outlined"
                           >
                             Metal Archives
                           </Button>
                         )}
-                        {album.bandcamp_url && album.bandcamp_url !== 'N/A' && (
-                          <Button
-                            size="small"
-                            startIcon={<OpenInNew />}
-                            href={album.bandcamp_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            color="secondary"
-                          >
-                            Bandcamp
-                          </Button>
-                        )}
+                        <PlatformLinks album={album} size="small" />
                       </Box>
                     </Box>
                   </CardContent>

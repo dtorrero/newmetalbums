@@ -1,0 +1,119 @@
+================================================================================
+                        METAL ALBUMS - CHANGELOG
+================================================================================
+
+Version: October 2, 2025
+================================================================================
+
+🎵 NEW FEATURE: Multi-Platform Music Links
+--------------------------------------------------------------------------------
+
+We've significantly expanded the platform link extraction system! Now when you
+browse albums, you'll see links to multiple music streaming and information
+platforms, not just Bandcamp.
+
+✨ What's New:
+
+  • 7 Platform Support: Albums now display links to:
+    🎵 Bandcamp      - Independent music platform
+    ▶️  YouTube       - Video and music streaming
+    🎧 Spotify       - Music streaming service
+    💿 Discogs       - Music database and marketplace
+    📻 Last.fm       - Music discovery and scrobbling
+    ☁️  SoundCloud    - Audio sharing platform
+    🌊 Tidal         - High-fidelity music streaming
+
+  • Smart Link Detection: The scraper automatically finds and extracts links
+    from Metal Archives' "Related Links" section for each band
+
+  • Beautiful UI: Platform links appear as color-coded buttons with icons,
+    making it easy to identify and access your preferred service
+
+  • Configurable: System administrators can enable/disable specific platforms
+    via configuration settings
+
+📊 How It Works:
+
+  1. When scraping albums, the system now visits each band's "Related Links"
+     page on Metal Archives
+  
+  2. It searches for links matching known platform patterns (youtube.com,
+     spotify.com, etc.)
+  
+  3. Found links are stored in the database alongside album information
+  
+  4. When viewing albums, all available platform links appear as clickable
+     buttons below the album details
+
+🎯 User Benefits:
+
+  • Quick Access: Click any platform button to instantly open the album on
+    your preferred music service
+  
+  • More Options: No longer limited to just Bandcamp - access albums across
+    multiple platforms
+  
+  • Visual Clarity: Color-coded buttons with emoji icons make it easy to
+    spot your favorite platforms at a glance
+  
+  • Complete Information: See all available streaming options in one place
+
+🔧 Technical Details:
+
+  Backend Changes:
+  - Added platform link extraction to scraper (scraper.py)
+  - Updated database schema with 6 new URL columns (db_manager.py)
+  - Enhanced Album data model with platform URL fields (models.py)
+  - Added configurable platform settings (config.py)
+
+  Frontend Changes:
+  - Created reusable PlatformLinks component (PlatformLinks.tsx)
+  - Updated Album type definitions (types.ts)
+  - Enhanced both AlbumDisplay and EnhancedAlbumDisplay components
+  - Added platform-specific styling and icons
+
+📝 Notes:
+
+  • Existing Data: Previously scraped albums won't have the new platform links.
+    You'll need to re-scrape dates to get the additional links.
+  
+  • Link Availability: Not all bands have links to all platforms. Only
+    available links are displayed.
+  
+  • Metal Archives Source: Links are extracted from Metal Archives' official
+    "Related Links" section, ensuring accuracy and reliability.
+
+================================================================================
+
+Previous Update: Authentication & Mobile Improvements
+--------------------------------------------------------------------------------
+
+Recent improvements from earlier commits:
+
+  • Conditional Admin Button: Admin panel button now only appears when
+    authenticated, improving security and UX
+
+  • Mobile Responsive Design: Enhanced mobile layout with:
+    - Condensed date format for smaller screens
+    - Responsive filter drawer (bottom sheet on mobile, side drawer on desktop)
+    - Sticky headers and bottom actions in filter panel
+    - Touch-friendly interface elements
+
+================================================================================
+
+🚀 Getting Started:
+
+To see the new platform links:
+
+  1. Start the application (backend + frontend)
+  2. Use the admin panel to scrape albums for a specific date
+  3. Browse to that date's albums
+  4. Look for the platform link buttons below each album's details
+  5. Click any button to open the album on that platform
+
+For questions or issues, please check the project documentation or create
+an issue on the project repository.
+
+================================================================================
+                            End of Changelog
+================================================================================

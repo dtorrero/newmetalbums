@@ -46,6 +46,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { AlbumWithGenres } from '../types';
 import { groupGenres, albumMatchesGenreGroups, GenreGroup, GenreHierarchy } from '../utils/genreGrouping';
+import PlatformLinks from './PlatformLinks';
 
 interface GenreFilter {
   genre: string;
@@ -382,23 +383,19 @@ const EnhancedAlbumDisplay: React.FC = () => {
                   </Box>
 
                   {/* Links */}
-                  <Box display="flex" gap={1} flexWrap="wrap">
+                  <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
                     {album.album_url && (
-                      <Button size="small" startIcon={<OpenInNew />} href={album.album_url} target="_blank">
-                        Metal Archives
-                      </Button>
-                    )}
-                    {album.bandcamp_url && album.bandcamp_url !== 'N/A' && (
                       <Button 
                         size="small" 
                         startIcon={<OpenInNew />} 
-                        href={album.bandcamp_url} 
+                        href={album.album_url} 
                         target="_blank"
-                        color="secondary"
+                        variant="outlined"
                       >
-                        Bandcamp
+                        Metal Archives
                       </Button>
                     )}
+                    <PlatformLinks album={album} size="small" />
                   </Box>
                 </CardContent>
               </Card>

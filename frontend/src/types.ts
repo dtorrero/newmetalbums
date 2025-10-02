@@ -14,6 +14,12 @@ export interface Album {
   cover_art: string;
   cover_path: string;
   bandcamp_url: string;
+  youtube_url?: string;
+  spotify_url?: string;
+  discogs_url?: string;
+  lastfm_url?: string;
+  soundcloud_url?: string;
+  tidal_url?: string;
   country_of_origin: string;
   location: string;
   genre: string;
