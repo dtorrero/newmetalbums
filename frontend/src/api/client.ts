@@ -163,6 +163,15 @@ export const api = {
     });
     return response.data;
   },
+
+  // Settings endpoints
+  getPlatformLinkSettings: async (): Promise<{ settings: { [key: string]: boolean } }> => {
+    const response = await apiClient.get('/api/settings/platform-links');
+    return response.data;
+  },
+
+  // Expose raw axios client for advanced usage
+  raw: apiClient,
 };
 
 export default api;

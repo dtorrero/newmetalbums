@@ -135,6 +135,18 @@ class AlbumsDatabase:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre_taxonomy_category ON genre_taxonomy(genre_category)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre_stats_name ON genre_stats(genre_name)')
         
+        # Settings table for user preferences
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT UNIQUE NOT NULL,
+                value TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                description TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         self.connection.commit()
         logger.info("Database tables created successfully")
     
@@ -591,6 +603,42 @@ class AlbumsDatabase:
             logger.error(f"Error updating genre statistics: {e}")
             self.connection.rollback()
             return False
+    
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Get a setting value by key"""
+        cursor = self.connection.cursor()
+        cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+        result = cursor.fetchone()
+        if result:
+            return json.loads(result['value'])
+        return default
+    
+    def set_setting(self, key: str, value: Any, category: str = 'general', description: str = None) -> bool:
+        """Set a setting value"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO settings (key, value, category, description, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (key, json.dumps(value), category, description))
+            self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting {key}: {e}")
+            return False
+    
+    def get_settings_by_category(self, category: str) -> Dict[str, Any]:
+        """Get all settings in a category"""
+        cursor = self.connection.cursor()
+        cursor.execute('SELECT key, value, description FROM settings WHERE category = ?', (category,))
+        results = cursor.fetchall()
+        return {
+            row['key']: {
+                'value': json.loads(row['value']),
+                'description': row['description']
+            }
+            for row in results
+        }
 
 def ingest_json_files(db: AlbumsDatabase, json_pattern: str = "data/albums_*.json"):
     """Ingest all JSON files matching pattern into database"""

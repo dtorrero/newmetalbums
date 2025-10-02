@@ -33,9 +33,10 @@ import {
   Schedule,
   Storage,
   Warning,
-  Logout
+  Logout,
+  Settings as SettingsIcon
 } from '@mui/icons-material';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { authFetch, logout } from '../utils/auth';
 
 interface ScrapeStatus {
@@ -66,6 +67,7 @@ interface AdminSummary {
 }
 
 const AdminPanel: React.FC = () => {
+  const navigate = useNavigate();
   const [scrapeDate, setScrapeDate] = useState(() => {
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, '0');
@@ -259,6 +261,15 @@ const AdminPanel: React.FC = () => {
         <Typography variant="h3" component="h1" sx={{ flexGrow: 1 }}>
           🔧 Admin Panel
         </Typography>
+        <Button
+          onClick={() => navigate('/admin/settings')}
+          startIcon={<SettingsIcon />}
+          variant="outlined"
+          color="primary"
+          sx={{ mr: 1 }}
+        >
+          Settings
+        </Button>
         <Button
           onClick={logout}
           startIcon={<Logout />}

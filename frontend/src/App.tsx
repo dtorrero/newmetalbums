@@ -7,6 +7,7 @@ import AlbumDisplay from './components/AlbumDisplay';
 import EnhancedAlbumDisplay from './components/EnhancedAlbumDisplay';
 import AdminPanel from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
+import Settings from './components/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AdminProvider } from './contexts/AdminContext';
 
@@ -82,6 +83,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <AdminPanel />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/settings" 
+              element={
+                <ProtectedRoute>
+                  <Settings />
                 </ProtectedRoute>
               } 
             />

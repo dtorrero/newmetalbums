@@ -891,6 +891,72 @@ async def get_admin_summary(token: str = Depends(verify_admin_token)):
         logger.error(f"Error fetching admin summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch admin summary")
 
+# Settings endpoints
+@app.get("/api/admin/settings/platform-links")
+async def get_platform_link_settings(token: str = Depends(verify_admin_token)):
+    """Get platform link visibility settings"""
+    import config as app_config
+    
+    # Get settings from database or use defaults from config
+    platforms = app_config.LINK_EXTRACTION.get('platforms', {})
+    settings = {}
+    
+    for platform_name, platform_info in platforms.items():
+        # Try to get from database first
+        db_setting = db.get_setting(f'platform_link_visible_{platform_name}')
+        if db_setting is not None:
+            visible = db_setting
+        else:
+            # Use config default
+            visible = platform_info.get('enabled', True)
+        
+        settings[platform_name] = {
+            'visible': visible,
+            'label': platform_name.capitalize(),
+            'patterns': platform_info.get('patterns', [])
+        }
+    
+    return {"settings": settings}
+
+@app.put("/api/admin/settings/platform-links")
+async def update_platform_link_settings(settings: dict, token: str = Depends(verify_admin_token)):
+    """Update platform link visibility settings"""
+    try:
+        for platform_name, platform_data in settings.items():
+            if 'visible' in platform_data:
+                db.set_setting(
+                    f'platform_link_visible_{platform_name}',
+                    platform_data['visible'],
+                    category='platform_links',
+                    description=f'Visibility setting for {platform_name} links'
+                )
+        
+        return {"message": "Settings updated successfully", "settings": settings}
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update settings")
+
+@app.get("/api/settings/platform-links")
+async def get_public_platform_link_settings():
+    """Get platform link visibility settings (public endpoint for frontend)"""
+    import config as app_config
+    
+    platforms = app_config.LINK_EXTRACTION.get('platforms', {})
+    settings = {}
+    
+    for platform_name, platform_info in platforms.items():
+        # Try to get from database first
+        db_setting = db.get_setting(f'platform_link_visible_{platform_name}')
+        if db_setting is not None:
+            visible = db_setting
+        else:
+            # Use config default
+            visible = platform_info.get('enabled', True)
+        
+        settings[platform_name] = visible
+    
+    return {"settings": settings}
+
 # Authentication endpoints
 @app.get("/api/auth/status")
 async def get_auth_status():

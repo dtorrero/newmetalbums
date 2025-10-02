@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Button, Tooltip } from '@mui/material';
 import { OpenInNew } from '@mui/icons-material';
 import { Album } from '../types';
+import { api } from '../api/client';
 
 interface PlatformLinksProps {
   album: Album;
@@ -31,9 +32,39 @@ export const PlatformLinks: React.FC<PlatformLinksProps> = ({
   size = 'small',
   orientation = 'horizontal' 
 }) => {
+  const [visibilitySettings, setVisibilitySettings] = useState<{ [key: string]: boolean }>({});
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await api.getPlatformLinkSettings();
+        setVisibilitySettings(response.settings);
+      } catch (error) {
+        console.error('Failed to load platform link settings:', error);
+        // Default to showing all if settings fail to load
+        const defaultSettings: { [key: string]: boolean } = {};
+        PLATFORMS.forEach(p => {
+          const platformName = String(p.key).replace('_url', '');
+          defaultSettings[platformName] = true;
+        });
+        setVisibilitySettings(defaultSettings);
+      } finally {
+        setLoaded(true);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  if (!loaded) {
+    return null; // Don't show anything until settings are loaded
+  }
+
   const availableLinks = PLATFORMS.filter(platform => {
     const url = album[platform.key];
-    return url && url !== 'N/A' && url !== '';
+    const platformName = String(platform.key).replace('_url', '');
+    const isVisible = visibilitySettings[platformName] !== false; // Default to true if not set
+    return url && url !== 'N/A' && url !== '' && isVisible;
   });
 
   if (availableLinks.length === 0) {
