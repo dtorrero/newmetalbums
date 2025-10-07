@@ -77,6 +77,7 @@ function App() {
             <Route path="/" element={<DateBrowser />} />
             <Route path="/date/:date" element={<EnhancedAlbumDisplay />} />
             <Route path="/date-old/:date" element={<AlbumDisplay />} />
+            <Route path="/period/:periodType/:periodKey" element={<EnhancedAlbumDisplay />} />
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route 
               path="/admin" 

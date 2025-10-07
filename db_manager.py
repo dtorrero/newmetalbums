@@ -377,6 +377,169 @@ class AlbumsDatabase:
         cursor.execute("SELECT COUNT(*) as count FROM albums WHERE release_date = ?", (release_date,))
         return cursor.fetchone()['count']
     
+    def get_dates_grouped(self, view_mode: str = 'day') -> List[Dict[str, Any]]:
+        """Get dates grouped by day, week, or month with aggregated stats"""
+        cursor = self.connection.cursor()
+        
+        if view_mode == 'day':
+            # Same as get_available_dates but with period info
+            cursor.execute('''
+                SELECT 
+                    release_date as period_key,
+                    release_date as start_date,
+                    release_date as end_date,
+                    'day' as period_type,
+                    COUNT(*) as album_count,
+                    COUNT(DISTINCT release_date) as dates_count,
+                    GROUP_CONCAT(DISTINCT genre) as genres
+                FROM albums 
+                WHERE release_date IS NOT NULL AND release_date != ''
+                GROUP BY release_date 
+                ORDER BY release_date DESC
+            ''')
+        elif view_mode == 'week':
+            # Group by ISO week (YYYY-Www format)
+            cursor.execute('''
+                SELECT 
+                    strftime('%Y-W%W', release_date) as period_key,
+                    MIN(release_date) as start_date,
+                    MAX(release_date) as end_date,
+                    'week' as period_type,
+                    COUNT(*) as album_count,
+                    COUNT(DISTINCT release_date) as dates_count,
+                    GROUP_CONCAT(DISTINCT genre) as genres
+                FROM albums 
+                WHERE release_date IS NOT NULL AND release_date != ''
+                GROUP BY strftime('%Y-W%W', release_date)
+                ORDER BY period_key DESC
+            ''')
+        elif view_mode == 'month':
+            # Group by month (YYYY-MM format)
+            cursor.execute('''
+                SELECT 
+                    strftime('%Y-%m', release_date) as period_key,
+                    MIN(release_date) as start_date,
+                    MAX(release_date) as end_date,
+                    'month' as period_type,
+                    COUNT(*) as album_count,
+                    COUNT(DISTINCT release_date) as dates_count,
+                    GROUP_CONCAT(DISTINCT genre) as genres
+                FROM albums 
+                WHERE release_date IS NOT NULL AND release_date != ''
+                GROUP BY strftime('%Y-%m', release_date)
+                ORDER BY period_key DESC
+            ''')
+        else:
+            raise ValueError(f"Invalid view_mode: {view_mode}")
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_albums_by_period(self, period_type: str, period_key: str, 
+                            limit: int = 50, offset: int = 0,
+                            genre_filters: List[str] = None,
+                            search_query: str = None) -> Dict[str, Any]:
+        """Get albums for a specific period (day/week/month) with pagination and filtering"""
+        cursor = self.connection.cursor()
+        
+        # Determine date range based on period type
+        if period_type == 'day':
+            start_date = end_date = period_key
+        elif period_type == 'week':
+            # Parse YYYY-Www format and get date range
+            # SQLite doesn't have great week support, so we'll use the dates directly
+            cursor.execute('''
+                SELECT MIN(release_date) as start, MAX(release_date) as end
+                FROM albums
+                WHERE strftime('%Y-W%W', release_date) = ?
+            ''', (period_key,))
+            row = cursor.fetchone()
+            if not row or not row['start']:
+                return {"albums": [], "total": 0, "period_key": period_key, "has_more": False}
+            start_date = row['start']
+            end_date = row['end']
+        elif period_type == 'month':
+            # Parse YYYY-MM format
+            cursor.execute('''
+                SELECT MIN(release_date) as start, MAX(release_date) as end
+                FROM albums
+                WHERE strftime('%Y-%m', release_date) = ?
+            ''', (period_key,))
+            row = cursor.fetchone()
+            if not row or not row['start']:
+                return {"albums": [], "total": 0, "period_key": period_key, "has_more": False}
+            start_date = row['start']
+            end_date = row['end']
+        else:
+            raise ValueError(f"Invalid period_type: {period_type}")
+        
+        # Build WHERE clause with filters
+        where_conditions = ['release_date >= ?', 'release_date <= ?']
+        params = [start_date, end_date]
+        
+        # Add genre filters
+        if genre_filters and len(genre_filters) > 0:
+            # Create OR conditions for each genre filter
+            genre_conditions = []
+            for genre in genre_filters:
+                genre_conditions.append('genre LIKE ?')
+                params.append(f'%{genre}%')
+            where_conditions.append(f"({' OR '.join(genre_conditions)})")
+        
+        # Add search query
+        if search_query and search_query.strip():
+            search_conditions = '(album_name LIKE ? OR band_name LIKE ? OR genre LIKE ?)'
+            where_conditions.append(search_conditions)
+            search_param = f'%{search_query.strip()}%'
+            params.extend([search_param, search_param, search_param])
+        
+        where_clause = ' AND '.join(where_conditions)
+        
+        # Get total count for pagination (with filters)
+        count_query = f'SELECT COUNT(*) as total FROM albums WHERE {where_clause}'
+        cursor.execute(count_query, params)
+        total = cursor.fetchone()['total']
+        
+        # Get paginated albums (with filters)
+        query = f'''
+            SELECT * FROM albums 
+            WHERE {where_clause}
+            ORDER BY release_date DESC, band_name, album_name
+            LIMIT ? OFFSET ?
+        '''
+        cursor.execute(query, params + [limit, offset])
+        
+        albums = [dict(row) for row in cursor.fetchall()]
+        
+        # Add tracks for each album
+        for album in albums:
+            cursor.execute('''
+                SELECT track_number, track_name, track_length, lyrics_url
+                FROM tracks 
+                WHERE album_id = ? 
+                ORDER BY CAST(track_number AS INTEGER)
+            ''', (album['album_id'],))
+            
+            album['tracklist'] = [dict(row) for row in cursor.fetchall()]
+            
+            # Parse details JSON
+            if album['details']:
+                try:
+                    album['details'] = json.loads(album['details'])
+                except:
+                    album['details'] = {}
+        
+        return {
+            "albums": albums,
+            "total": total,
+            "period_key": period_key,
+            "period_type": period_type,
+            "start_date": start_date,
+            "end_date": end_date,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + len(albums)) < total
+        }
+    
     # Genre-related methods
     
     def insert_parsed_genres(self, album_id: str, parsed_genres: List[Dict[str, Any]]) -> bool:

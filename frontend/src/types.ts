@@ -44,6 +44,16 @@ export interface DateInfo {
   genres: string;
 }
 
+export interface PeriodInfo {
+  period_key: string;
+  start_date: string;
+  end_date: string;
+  period_type: 'day' | 'week' | 'month';
+  album_count: number;
+  dates_count: number;
+  genres: string;
+}
+
 export interface ApiResponse<T> {
   data?: T;
   total?: number;
@@ -56,10 +66,30 @@ export interface DatesResponse {
   total: number;
 }
 
+export interface PeriodsResponse {
+  periods: PeriodInfo[];
+  total: number;
+  view: 'day' | 'week' | 'month';
+}
+
 export interface AlbumsResponse {
   albums: Album[];
   total: number;
   date: string;
+}
+
+export interface PeriodAlbumsResponse {
+  albums: Album[];
+  total: number;
+  period_key: string;
+  period_type: 'day' | 'week' | 'month';
+  start_date: string;
+  end_date: string;
+  limit: number;
+  offset: number;
+  page: number;
+  total_pages: number;
+  has_more: boolean;
 }
 
 export interface SearchResponse {

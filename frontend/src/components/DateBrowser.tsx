@@ -13,65 +13,87 @@ import {
   Fab,
   useMediaQuery,
   useTheme,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
-import { CalendarToday, Album, Settings } from '@mui/icons-material';
+import { CalendarToday, Album, Settings, Today, DateRange, CalendarMonth } from '@mui/icons-material';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
-import { DateInfo } from '../types';
+import { PeriodInfo } from '../types';
 import { useAdminContext } from '../contexts/AdminContext';
 
 const DateBrowser: React.FC = () => {
-  const [dates, setDates] = useState<DateInfo[]>([]);
+  const [periods, setPeriods] = useState<PeriodInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day');
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { showAdminButton } = useAdminContext();
 
   useEffect(() => {
-    const fetchDates = async () => {
+    const fetchPeriods = async () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await api.getDates();
-        setDates(response.dates);
+        const response = await api.getDatesGrouped(viewMode);
+        setPeriods(response.periods);
       } catch (err) {
-        console.error('Error fetching dates:', err);
+        console.error('Error fetching periods:', err);
         setError('Failed to load release dates. Please check if the backend is running.');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchDates();
-  }, []);
+    fetchPeriods();
+  }, [viewMode]);
 
-  const handleDateClick = (date: string) => {
-    navigate(`/date/${date}`);
+  const handlePeriodClick = (period: PeriodInfo) => {
+    // Navigate to period view with type and key
+    navigate(`/period/${period.period_type}/${encodeURIComponent(period.period_key)}`);
   };
 
-  const formatDate = (dateString: string, mobile: boolean = false) => {
+  const handleViewModeChange = (_event: React.MouseEvent<HTMLElement>, newMode: 'day' | 'week' | 'month' | null) => {
+    if (newMode !== null) {
+      setViewMode(newMode);
+    }
+  };
+
+  const formatPeriodLabel = (period: PeriodInfo, mobile: boolean = false): string => {
     try {
-      const date = new Date(dateString);
-      if (mobile) {
-        // Mobile: Short numeric format (e.g., "Sep 26, 2025")
-        return date.toLocaleDateString('en-US', {
+      const startDate = new Date(period.start_date);
+      const endDate = new Date(period.end_date);
+      
+      if (period.period_type === 'day') {
+        if (mobile) {
+          return startDate.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          });
+        } else {
+          return startDate.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          });
+        }
+      } else if (period.period_type === 'week') {
+        const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const endStr = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        return mobile ? `${startStr} - ${endStr}` : `Week of ${startStr} - ${endStr}`;
+      } else if (period.period_type === 'month') {
+        return startDate.toLocaleDateString('en-US', {
           year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        });
-      } else {
-        // Desktop: Full format (e.g., "Friday, September 26, 2025")
-        return date.toLocaleDateString('en-US', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
+          month: mobile ? 'short' : 'long',
         });
       }
+      return period.period_key;
     } catch {
-      return dateString;
+      return period.period_key;
     }
   };
 
@@ -155,7 +177,31 @@ const DateBrowser: React.FC = () => {
           )}
         </Box>
 
-        {dates.length === 0 ? (
+        {/* View Mode Toggle */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+          <ToggleButtonGroup
+            value={viewMode}
+            exclusive
+            onChange={handleViewModeChange}
+            aria-label="view mode"
+            size={isMobile ? "small" : "medium"}
+          >
+            <ToggleButton value="day" aria-label="day view">
+              <Today sx={{ mr: isMobile ? 0 : 1 }} />
+              {!isMobile && 'Day'}
+            </ToggleButton>
+            <ToggleButton value="week" aria-label="week view">
+              <DateRange sx={{ mr: isMobile ? 0 : 1 }} />
+              {!isMobile && 'Week'}
+            </ToggleButton>
+            <ToggleButton value="month" aria-label="month view">
+              <CalendarMonth sx={{ mr: isMobile ? 0 : 1 }} />
+              {!isMobile && 'Month'}
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+
+        {periods.length === 0 ? (
           <Alert severity="info">
             No release dates found. The database might be empty.
           </Alert>
@@ -169,9 +215,9 @@ const DateBrowser: React.FC = () => {
             }}
             gap={isMobile ? 2 : 3}
           >
-            {dates.map((dateInfo) => (
+            {periods.map((period) => (
               <Card
-                key={dateInfo.release_date}
+                key={period.period_key}
                 elevation={2}
                 sx={{
                   height: '100%',
@@ -183,7 +229,7 @@ const DateBrowser: React.FC = () => {
                 }}
               >
                 <CardActionArea
-                  onClick={() => handleDateClick(dateInfo.release_date)}
+                  onClick={() => handlePeriodClick(period)}
                   sx={{ height: '100%', p: 0 }}
                 >
                   <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -198,14 +244,15 @@ const DateBrowser: React.FC = () => {
                           lineHeight: 1.2
                         }}
                       >
-                        {formatDate(dateInfo.release_date, isMobile)}
+                        {formatPeriodLabel(period, isMobile)}
                       </Typography>
                     </Box>
 
                     <Box display="flex" alignItems="center" mb={2}>
                       <Album color="secondary" sx={{ mr: 1 }} />
                       <Typography variant="body1" color="text.secondary">
-                        {dateInfo.album_count} album{dateInfo.album_count !== 1 ? 's' : ''}
+                        {period.album_count} album{period.album_count !== 1 ? 's' : ''}
+                        {period.period_type !== 'day' && ` across ${period.dates_count} date${period.dates_count !== 1 ? 's' : ''}`}
                       </Typography>
                     </Box>
 
@@ -214,7 +261,7 @@ const DateBrowser: React.FC = () => {
                         Top Genres:
                       </Typography>
                       <Box display="flex" flexWrap="wrap" gap={0.5}>
-                        {getGenreChips(dateInfo.genres).map((genre, index) => (
+                        {getGenreChips(period.genres).map((genre, index) => (
                           <Chip
                             key={index}
                             label={genre}
@@ -223,7 +270,7 @@ const DateBrowser: React.FC = () => {
                             color="primary"
                           />
                         ))}
-                        {getGenreChips(dateInfo.genres).length === 0 && (
+                        {getGenreChips(period.genres).length === 0 && (
                           <Typography variant="body2" color="text.disabled">
                             Various
                           </Typography>

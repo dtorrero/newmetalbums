@@ -2,6 +2,107 @@
                         METAL ALBUMS - CHANGELOG
 ================================================================================
 
+Version: October 7, 2025
+================================================================================
+
+🗓️ NEW FEATURE: Month/Week/Day Grouping with Smart Filtering
+--------------------------------------------------------------------------------
+
+Major enhancement to the release dates browsing experience! You can now view
+albums grouped by month, week, or day, with intelligent backend filtering that
+handles large datasets efficiently.
+
+✨ What's New:
+
+  • View Mode Toggle: Switch between Day, Week, and Month views on the home page
+    - Day View: Individual dates (existing behavior)
+    - Week View: Albums grouped by ISO week (e.g., "Week of Sep 23-29, 2025")
+    - Month View: Albums grouped by month (e.g., "September 2025")
+
+  • Aggregated Statistics: Period cards show:
+    - Total album count across all dates in the period
+    - Number of dates with releases
+    - Top genres for the period
+
+  • Backend Filtering & Pagination: Efficient handling of large datasets
+    - Filters applied at database level (SQL WHERE clauses)
+    - Pagination works on filtered results (not raw data)
+    - Handles 2000+ albums per month without performance issues
+
+  • Smart Filtering Behavior:
+    - Single dates: Client-side filtering (instant, no API calls)
+    - Periods: Backend filtering (scalable, handles large datasets)
+    - Automatic detection and appropriate strategy selection
+
+  • Debounced Search: 500ms delay on search input for periods to prevent
+    API spam while typing
+
+📊 How It Works:
+
+  1. Home page displays three toggle buttons: [Day] [Week] [Month]
+  
+  2. Select your preferred view to see grouped release periods
+  
+  3. Click any period card to view albums with full card layout and filters
+  
+  4. For large periods (e.g., months with 500+ albums):
+     - Only 50 albums loaded per page
+     - Genre filters trigger backend query
+     - Pagination shows correct filtered counts
+     - Search is debounced to reduce server load
+
+🎯 User Benefits:
+
+  • Better Overview: See release patterns across weeks and months
+  
+  • Efficient Browsing: Navigate large datasets without performance issues
+  
+  • Correct Pagination: Filter shows "5 albums found, 1 page" instead of
+    fragmented results across multiple pages
+  
+  • Consistent Experience: Same card layout and genre filters work everywhere
+  
+  • Mobile Optimized: All views work smoothly on mobile devices
+
+  • Filtering now also groups be subgenres. When filtering the next filters will
+    show subgenres of the selected filter, when deselecting we will go back to the 
+    general genres fitler. 
+
+🔧 Technical Details:
+
+  Backend Changes:
+  - Added get_dates_grouped() method with SQL grouping by day/week/month
+  - Enhanced get_albums_by_period() with genre_filters and search_query params
+  - New API endpoint: GET /api/dates/grouped?view=day|week|month
+  - Updated API endpoint: GET /api/albums/period/{type}/{key}?genres=...&search=...
+  - SQL-based filtering with proper WHERE clauses and pagination
+
+  Frontend Changes:
+  - Updated DateBrowser with ToggleButtonGroup for view mode selection
+  - Enhanced EnhancedAlbumDisplay to support both dates and periods
+  - Added debouncing logic for search input (periods only)
+  - Smart filtering: client-side for dates, backend for periods
+  - Automatic page reset when filters change
+  - Updated TypeScript types: PeriodInfo, PeriodsResponse, PeriodAlbumsResponse
+  - Enhanced API client with filtering parameters
+
+  Database:
+  - No schema changes required
+  - Uses existing release_date field with strftime() for grouping
+  - Efficient SQL queries with proper indexing
+
+📝 Notes:
+
+  • Performance: Tested with 2000+ albums per month - smooth performance
+  
+  • Backward Compatible: Single date view works exactly as before
+  
+  • Filter Accuracy: Backend filtering ensures pagination counts are correct
+  
+  • Memory Efficient: Only loads 50 albums at a time, regardless of total count
+
+================================================================================
+
 Version: October 2, 2025
 ================================================================================
 

@@ -43,6 +43,7 @@ import {
   Close,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Pagination } from '@mui/material';
 import { api } from '../api/client';
 import { AlbumWithGenres } from '../types';
 import { groupGenres, albumMatchesGenreGroups, GenreGroup, GenreHierarchy } from '../utils/genreGrouping';
@@ -56,7 +57,7 @@ interface GenreFilter {
 }
 
 const EnhancedAlbumDisplay: React.FC = () => {
-  const { date } = useParams<{ date: string }>();
+  const { date, periodType, periodKey } = useParams<{ date?: string; periodType?: string; periodKey?: string }>();
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -68,7 +69,13 @@ const EnhancedAlbumDisplay: React.FC = () => {
   const [genreHierarchy, setGenreHierarchy] = useState<GenreHierarchy | null>(null);
   const [selectedGenreGroups, setSelectedGenreGroups] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState(''); // Separate input state for debouncing
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [pageTitle, setPageTitle] = useState<string>('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalAlbums, setTotalAlbums] = useState(0);
+  const [periodInfo, setPeriodInfo] = useState<{ start_date: string; end_date: string } | null>(null);
   const [imageDialog, setImageDialog] = useState<{
     open: boolean;
     imageUrl: string;
@@ -91,14 +98,64 @@ const EnhancedAlbumDisplay: React.FC = () => {
     return colors[Math.abs(hash) % colors.length];
   };
 
+  // Format period title for display
+  const formatPeriodTitle = (): string => {
+    if (!periodInfo) return periodKey || '';
+    
+    const startDate = new Date(periodInfo.start_date);
+    const endDate = new Date(periodInfo.end_date);
+    
+    if (periodType === 'day') {
+      return `Albums Released on ${startDate.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })}`;
+    } else if (periodType === 'week') {
+      const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const endStr = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return `Albums Released: Week of ${startStr} - ${endStr}`;
+    } else if (periodType === 'month') {
+      return `Albums Released: ${startDate.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+      })}`;
+    }
+    return periodKey || '';
+  };
+
   // Fetch albums and build genre hierarchy
   useEffect(() => {
     const fetchAlbums = async () => {
-      if (!date) return;
+      if (!date && !periodKey) return;
       
       try {
         setLoading(true);
-        const response = await api.getAlbumsByDate(date);
+        let response;
+        
+        if (periodType && periodKey) {
+          // Fetch period data with pagination AND filtering
+          const periodResponse = await api.getAlbumsByPeriod(
+            periodType as 'day' | 'week' | 'month',
+            periodKey,
+            page,
+            50,
+            selectedGenreGroups.length > 0 ? selectedGenreGroups : undefined,
+            searchQuery || undefined
+          );
+          response = { albums: periodResponse.albums };
+          setTotalPages(periodResponse.total_pages);
+          setTotalAlbums(periodResponse.total);
+          setPeriodInfo({ start_date: periodResponse.start_date, end_date: periodResponse.end_date });
+        } else if (date) {
+          // Fetch single date data (no pagination, client-side filtering)
+          response = await api.getAlbumsByDate(date);
+          setTotalAlbums(response.albums.length);
+        } else {
+          return;
+        }
+        
         setAlbums(response.albums);
         
         // Build genre map from raw genre strings
@@ -115,19 +172,33 @@ const EnhancedAlbumDisplay: React.FC = () => {
         // Create smart genre hierarchy
         const hierarchy = groupGenres(genreMap);
         setGenreHierarchy(hierarchy);
-        setFilteredAlbums(response.albums);
+        
+        // For single dates, filter client-side; for periods, already filtered by backend
+        if (date) {
+          setFilteredAlbums(response.albums);
+        } else {
+          // Backend already filtered, just set the albums
+          setFilteredAlbums(response.albums);
+        }
       } catch (err) {
-        setError('Failed to load albums for this date.');
+        setError('Failed to load albums for this period.');
       } finally {
         setLoading(false);
       }
     };
 
     fetchAlbums();
-  }, [date]);
+  }, [date, periodType, periodKey, page, selectedGenreGroups, searchQuery]);
 
-  // Filter albums using smart genre groups
+  // Filter albums using smart genre groups (ONLY for single dates, not periods)
   const filterAlbums = useCallback(() => {
+    // For periods, filtering is done on backend, so skip client-side filtering
+    if (periodType && periodKey) {
+      setFilteredAlbums(albums);
+      return;
+    }
+    
+    // For single dates, do client-side filtering
     let filtered = albums;
 
     // Filter by selected genre groups
@@ -149,11 +220,35 @@ const EnhancedAlbumDisplay: React.FC = () => {
     }
 
     setFilteredAlbums(filtered);
-  }, [albums, selectedGenreGroups, searchQuery]);
+  }, [albums, selectedGenreGroups, searchQuery, periodType, periodKey]);
 
   useEffect(() => {
-    filterAlbums();
-  }, [filterAlbums]);
+    // Only run client-side filtering for single dates
+    if (date) {
+      filterAlbums();
+    }
+  }, [filterAlbums, date]);
+  
+  // Debounce search input (only for periods with backend filtering)
+  useEffect(() => {
+    if (periodType && periodKey) {
+      const timer = setTimeout(() => {
+        setSearchQuery(searchInput);
+      }, 500); // 500ms debounce
+      
+      return () => clearTimeout(timer);
+    } else {
+      // For single dates, update immediately (client-side filtering is fast)
+      setSearchQuery(searchInput);
+    }
+  }, [searchInput, periodType, periodKey]);
+  
+  // Reset to page 1 when filters change (for periods only)
+  useEffect(() => {
+    if (periodType && periodKey && page !== 1) {
+      setPage(1);
+    }
+  }, [selectedGenreGroups, searchQuery]);
 
   const getCoverImageUrl = (album: AlbumWithGenres) => {
     if (album.cover_path && album.cover_path !== 'N/A') {
@@ -250,12 +345,31 @@ const EnhancedAlbumDisplay: React.FC = () => {
         </Box>
 
         <Typography variant="h4" component="h1" gutterBottom>
-          🤘 Albums Released on {date}
+          🤘 {periodType && periodInfo ? formatPeriodTitle() : `Albums Released on ${date}`}
         </Typography>
         
         <Typography variant="h6" color="text.secondary" sx={{ mb: 4 }}>
           {filteredAlbums.length} of {albums.length} albums
+          {totalPages > 1 && ` (Page ${page} of ${totalPages}, ${totalAlbums} total)`}
         </Typography>
+
+        {/* Pagination Top */}
+        {totalPages > 1 && (
+          <Box display="flex" justifyContent="center" mb={3}>
+            <Pagination 
+              count={totalPages} 
+              page={page} 
+              onChange={(_event, value) => {
+                setPage(value);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              color="primary"
+              size="large"
+              showFirstButton
+              showLastButton
+            />
+          </Box>
+        )}
 
         {/* Albums Grid */}
         <Box
@@ -402,6 +516,24 @@ const EnhancedAlbumDisplay: React.FC = () => {
           ))}
         </Box>
 
+        {/* Pagination Bottom */}
+        {totalPages > 1 && (
+          <Box display="flex" justifyContent="center" mt={4}>
+            <Pagination 
+              count={totalPages} 
+              page={page} 
+              onChange={(_event, value) => {
+                setPage(value);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              color="primary"
+              size="large"
+              showFirstButton
+              showLastButton
+            />
+          </Box>
+        )}
+
         {/* Filter Drawer */}
         <Drawer
           anchor={isMobile ? "bottom" : "right"}
@@ -455,8 +587,8 @@ const EnhancedAlbumDisplay: React.FC = () => {
             <TextField
               fullWidth
               placeholder="Search..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               InputProps={{
                 startAdornment: <InputAdornment position="start"><Search /></InputAdornment>,
               }}

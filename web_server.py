@@ -132,6 +132,24 @@ async def get_available_dates():
         logger.error(f"Error fetching dates: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch dates")
 
+@app.get("/api/dates/grouped")
+async def get_dates_grouped(
+    view: str = Query('day', description="View mode: day, week, or month")
+):
+    """Get dates grouped by day, week, or month with aggregated statistics"""
+    try:
+        if view not in ['day', 'week', 'month']:
+            raise HTTPException(status_code=400, detail="Invalid view mode. Must be 'day', 'week', or 'month'")
+        
+        periods = db.get_dates_grouped(view)
+        return {"periods": periods, "total": len(periods), "view": view}
+    except ValueError as e:
+        logger.error(f"Invalid view mode: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error fetching grouped dates: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch grouped dates")
+
 @app.get("/api/albums/{release_date}")
 async def get_albums_by_date(release_date: str):
     """Get all albums for a specific release date"""
@@ -140,6 +158,51 @@ async def get_albums_by_date(release_date: str):
         return {"albums": albums, "total": len(albums), "date": release_date}
     except Exception as e:
         logger.error(f"Error fetching albums for {release_date}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch albums")
+
+@app.get("/api/albums/period/{period_type}/{period_key}")
+async def get_albums_by_period(
+    period_type: str,
+    period_key: str,
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    limit: int = Query(50, ge=1, le=200, description="Items per page"),
+    genres: Optional[str] = Query(None, description="Comma-separated list of genre filters"),
+    search: Optional[str] = Query(None, description="Search query for album/band/genre")
+):
+    """Get albums for a specific period (day/week/month) with pagination and filtering"""
+    try:
+        if period_type not in ['day', 'week', 'month']:
+            raise HTTPException(status_code=400, detail="Invalid period_type. Must be 'day', 'week', or 'month'")
+        
+        # Parse genre filters
+        genre_filters = None
+        if genres:
+            genre_filters = [g.strip() for g in genres.split(',') if g.strip()]
+        
+        offset = (page - 1) * limit
+        result = db.get_albums_by_period(
+            period_type, 
+            period_key, 
+            limit, 
+            offset,
+            genre_filters=genre_filters,
+            search_query=search
+        )
+        
+        # Add pagination metadata
+        result['page'] = page
+        result['total_pages'] = (result['total'] + limit - 1) // limit  # Ceiling division
+        result['filters'] = {
+            'genres': genre_filters,
+            'search': search
+        }
+        
+        return result
+    except ValueError as e:
+        logger.error(f"Invalid period parameters: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error fetching albums for period {period_type}/{period_key}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch albums")
 
 @app.get("/api/search")

@@ -8,7 +8,9 @@ import {
   StatsResponse,
   GenreResponse,
   GenreSearchResponse,
-  AlbumsWithGenresResponse
+  AlbumsWithGenresResponse,
+  PeriodsResponse,
+  PeriodAlbumsResponse
 } from '../types';
 
 // Auth-related types
@@ -78,9 +80,45 @@ export const api = {
     return response.data;
   },
 
+  // Get dates grouped by day, week, or month
+  getDatesGrouped: async (view: 'day' | 'week' | 'month' = 'day'): Promise<PeriodsResponse> => {
+    const response = await apiClient.get<PeriodsResponse>('/api/dates/grouped', {
+      params: { view }
+    });
+    return response.data;
+  },
+
   // Get albums for a specific date
   getAlbumsByDate: async (date: string): Promise<AlbumsResponse> => {
     const response = await apiClient.get<AlbumsResponse>(`/api/albums/${date}`);
+    return response.data;
+  },
+
+  // Get albums for a specific period (day/week/month) with pagination and filtering
+  getAlbumsByPeriod: async (
+    periodType: 'day' | 'week' | 'month',
+    periodKey: string,
+    page: number = 1,
+    limit: number = 50,
+    genreFilters?: string[],
+    searchQuery?: string
+  ): Promise<PeriodAlbumsResponse> => {
+    const params: any = { page, limit };
+    
+    // Add genre filters as comma-separated string
+    if (genreFilters && genreFilters.length > 0) {
+      params.genres = genreFilters.join(',');
+    }
+    
+    // Add search query
+    if (searchQuery && searchQuery.trim()) {
+      params.search = searchQuery.trim();
+    }
+    
+    const response = await apiClient.get<PeriodAlbumsResponse>(
+      `/api/albums/period/${periodType}/${encodeURIComponent(periodKey)}`,
+      { params }
+    );
     return response.data;
   },
 
