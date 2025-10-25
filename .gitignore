@@ -3,6 +3,7 @@
 test_*.py
 *_test.py
 IMPROVEMENTS_PLAN.txt
+diagnostics.py
 # Logs
 logs
 *.log

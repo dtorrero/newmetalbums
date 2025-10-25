@@ -1,0 +1,348 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Box,
+  Typography,
+  IconButton,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  LinearProgress,
+  CircularProgress,
+  Alert,
+  Chip,
+} from '@mui/material';
+import {
+  PlayArrow,
+  Pause,
+  SkipNext,
+  SkipPrevious,
+  VolumeUp,
+} from '@mui/icons-material';
+
+interface BandcampTrack {
+  title: string;
+  duration: number;
+  track_num: number;
+  file_mp3: string;
+}
+
+interface BandcampPlayerProps {
+  bandcampUrl: string;
+  albumTitle?: string;
+  artist?: string;
+}
+
+export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
+  bandcampUrl,
+  albumTitle,
+  artist,
+}) => {
+  const [tracks, setTracks] = useState<BandcampTrack[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  // Fetch tracks from backend
+  useEffect(() => {
+    const fetchTracks = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        setCurrentTrackIndex(0);  // Reset to first track when album changes
+        setIsPlaying(false);  // Reset play state
+        setCurrentTime(0);
+        setDuration(0);
+        
+        const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+        const response = await fetch(
+          `${baseUrl}/api/bandcamp/tracks?url=${encodeURIComponent(bandcampUrl)}`
+        );
+        
+        if (!response.ok) {
+          throw new Error('Failed to load tracks');
+        }
+        
+        const data = await response.json();
+        
+        if (data.found && data.tracks && data.tracks.length > 0) {
+          setTracks(data.tracks);
+        } else {
+          setError('No playable tracks found');
+        }
+      } catch (err) {
+        console.error('Error fetching Bandcamp tracks:', err);
+        setError('Could not load tracks. Please try opening in Bandcamp.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTracks();
+  }, [bandcampUrl]);
+
+  // Audio event handlers
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const handleDurationChange = () => setDuration(audio.duration);
+    const handleEnded = () => handleNext();
+    const handlePlay = () => {
+      console.log('Audio play event fired');
+      setIsPlaying(true);
+    };
+    const handlePause = () => {
+      console.log('Audio pause event fired');
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('play', handlePlay);
+    audio.addEventListener('pause', handlePause);
+
+    return () => {
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('pause', handlePause);
+    };
+  }, []);
+
+  // Load track when index changes
+  useEffect(() => {
+    if (tracks.length > 0 && audioRef.current) {
+      const track = tracks[currentTrackIndex];
+      if (track && track.file_mp3) {
+        audioRef.current.src = track.file_mp3;
+        // Auto-play when track changes
+        audioRef.current.play()
+          .then(() => {
+            // Successfully started playing - state will be set by 'play' event
+          })
+          .catch(err => {
+            console.error('Playback error:', err);
+            setIsPlaying(false);
+          });
+      }
+    }
+  }, [currentTrackIndex, tracks]);
+
+  const handlePlayPause = async () => {
+    if (!audioRef.current) return;
+    
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch (err) {
+        console.error('Playback error:', err);
+        setIsPlaying(false);
+      }
+    }
+  };
+
+  const handleNext = () => {
+    if (currentTrackIndex < tracks.length - 1) {
+      setCurrentTrackIndex(currentTrackIndex + 1);
+    } else {
+      setCurrentTrackIndex(0); // Loop back to start
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentTrackIndex > 0) {
+      setCurrentTrackIndex(currentTrackIndex - 1);
+    } else {
+      setCurrentTrackIndex(tracks.length - 1); // Loop to end
+    }
+  };
+
+  const handleTrackSelect = (index: number) => {
+    setCurrentTrackIndex(index);
+    // isPlaying will be set by the audio 'play' event
+  };
+
+  const handleSeek = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current) return;
+    
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const percentage = x / rect.width;
+    audioRef.current.currentTime = percentage * duration;
+  };
+
+  const formatTime = (seconds: number) => {
+    if (isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
+        <CircularProgress />
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          Loading tracks from Bandcamp...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert severity="error" sx={{ m: 2 }}>
+        {error}
+      </Alert>
+    );
+  }
+
+  if (tracks.length === 0) {
+    return (
+      <Alert severity="info" sx={{ m: 2 }}>
+        No tracks available for this album.
+      </Alert>
+    );
+  }
+
+  const currentTrack = tracks[currentTrackIndex];
+  
+  // Safety check
+  if (!currentTrack) {
+    return (
+      <Alert severity="warning" sx={{ m: 2 }}>
+        Invalid track index. Please try again.
+      </Alert>
+    );
+  }
+
+  return (
+    <Box sx={{ width: '100%' }}>
+      {/* Hidden audio element */}
+      <audio ref={audioRef} preload="metadata" />
+
+      {/* Current Track Info */}
+      <Box sx={{ px: 2, py: 1, bgcolor: 'grey.900', borderRadius: 1, mb: 1 }}>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          Now Playing:
+        </Typography>
+        <Typography variant="body1" fontWeight="bold" noWrap>
+          {currentTrack.title}
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+          <Chip 
+            label={`Track ${currentTrack.track_num}`} 
+            size="small" 
+            sx={{ bgcolor: 'rgba(255,255,255,0.1)' }}
+          />
+          <Typography variant="caption" color="text.secondary">
+            {formatTime(currentTime)} / {formatTime(duration)}
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Progress Bar */}
+      <Box 
+        sx={{ 
+          width: '100%', 
+          height: 6, 
+          bgcolor: 'grey.800', 
+          borderRadius: 1,
+          cursor: 'pointer',
+          mb: 2,
+          '&:hover': { bgcolor: 'grey.700' }
+        }}
+        onClick={handleSeek}
+      >
+        <Box
+          sx={{
+            width: `${(currentTime / duration) * 100}%`,
+            height: '100%',
+            bgcolor: 'primary.main',
+            borderRadius: 1,
+            transition: 'width 0.1s linear',
+          }}
+        />
+      </Box>
+
+      {/* Playback Controls */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1, mb: 2 }}>
+        <IconButton onClick={handlePrevious} disabled={tracks.length <= 1}>
+          <SkipPrevious />
+        </IconButton>
+        
+        <IconButton
+          onClick={handlePlayPause}
+          sx={{
+            bgcolor: 'primary.main',
+            color: 'white',
+            '&:hover': { bgcolor: 'primary.dark' },
+            width: 56,
+            height: 56,
+          }}
+        >
+          {isPlaying ? <Pause /> : <PlayArrow />}
+        </IconButton>
+        
+        <IconButton onClick={handleNext} disabled={tracks.length <= 1}>
+          <SkipNext />
+        </IconButton>
+      </Box>
+
+      {/* Track List */}
+      <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
+        <Typography variant="caption" color="text.secondary" sx={{ px: 2, pb: 1 }}>
+          Track List ({tracks.length} tracks):
+        </Typography>
+        <List dense>
+          {tracks.map((track, index) => (
+            <ListItem key={index} disablePadding>
+              <ListItemButton
+                selected={index === currentTrackIndex}
+                onClick={() => handleTrackSelect(index)}
+                sx={{
+                  '&.Mui-selected': {
+                    bgcolor: 'primary.dark',
+                    '&:hover': { bgcolor: 'primary.main' }
+                  }
+                }}
+              >
+                <ListItemText
+                  primary={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 20 }}>
+                        {track.track_num}.
+                      </Typography>
+                      <Typography variant="body2" noWrap>
+                        {track.title}
+                      </Typography>
+                      {index === currentTrackIndex && isPlaying && (
+                        <VolumeUp sx={{ fontSize: 16, ml: 'auto' }} />
+                      )}
+                    </Box>
+                  }
+                  secondary={formatTime(track.duration)}
+                />
+              </ListItemButton>
+            </ListItem>
+          ))}
+        </List>
+      </Box>
+    </Box>
+  );
+};
+
+export default BandcampPlayer;

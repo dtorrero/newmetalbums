@@ -22,9 +22,13 @@ import logging
 from pathlib import Path
 from db_manager import AlbumsDatabase, ingest_json_files
 from scraper import MetalArchivesScraper
-from models import Album
+from models import (
+    Album, PlaylistCreate, PlaylistUpdate, PlaylistItemCreate,
+    PlaylistItemResponse, PlaylistResponse, ReorderRequest
+)
 from auth_manager import AuthManager
 from genre_parser import GenreParser
+from platform_verifier import PlatformVerifier
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -753,15 +757,51 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
         db.update_genre_statistics()
         logger.info(f"Genre parsing completed for {len(albums)} albums")
         
+        # Close scraper before verification
+        await scraper.close()
+        
+        # Auto-verify playable URLs after successful scraping
+        logger.info(f"🎵 Starting automatic verification for {scrape_date}...")
         scraping_status.update({
-            "is_running": False,
-            "status_message": f"Successfully scraped and saved {len(albums)} albums for {scrape_date}",
-            "end_time": datetime.now().isoformat(),
-            "should_stop": False,  # Reset stop flag after successful completion
-            "rate_limited": False  # Reset rate limited flag on success
+            "status_message": f"Scraped {len(albums)} albums. Now verifying playable URLs...",
+            "progress": len(albums),
+            "total": len(albums)
         })
         
-        await scraper.close()
+        try:
+            from batch_verifier import BatchVerifier
+            verifier = BatchVerifier(db, headless=True)
+            await verifier.initialize()
+            
+            verification_stats = await verifier.verify_date_range(
+                scrape_date,
+                scrape_date,
+                min_similarity=75
+            )
+            
+            await verifier.close()
+            
+            logger.info(f"✓ Verification complete: {verification_stats['verified']}/{verification_stats['total']} albums verified")
+            
+            scraping_status.update({
+                "is_running": False,
+                "status_message": f"Successfully scraped {len(albums)} albums and verified {verification_stats['verified']} playable URLs for {scrape_date}",
+                "end_time": datetime.now().isoformat(),
+                "should_stop": False,
+                "rate_limited": False,
+                "verification_stats": verification_stats
+            })
+            
+        except Exception as verify_error:
+            logger.error(f"Verification failed: {verify_error}")
+            scraping_status.update({
+                "is_running": False,
+                "status_message": f"Successfully scraped {len(albums)} albums for {scrape_date}. Verification failed: {str(verify_error)}",
+                "end_time": datetime.now().isoformat(),
+                "should_stop": False,
+                "rate_limited": False,
+                "verification_error": str(verify_error)
+            })
         
     except Exception as e:
         logger.error(f"Scraping failed: {e}")
@@ -866,29 +906,91 @@ async def get_scrape_status(token: str = Depends(verify_admin_token)):
     else:
         status_with_lock["user_friendly_status"] = "Ready to start scraping"
     
-    return status_with_lock
-
-@app.post("/api/admin/scrape/stop")
-async def stop_scraping(token: str = Depends(verify_admin_token)):
-    """Stop the currently running scraping process"""
-    global scraping_status
-    
-    # Check both status flag and lock to ensure consistency
-    if not scraping_status["is_running"] and not scraping_lock.locked():
-        raise HTTPException(status_code=400, detail="No scraping process is currently running")
-    
-    # Additional safety check - if lock is held but status says not running, something is inconsistent
-    if scraping_lock.locked() and not scraping_status["is_running"]:
-        logger.warning("Inconsistent state detected: lock held but status shows not running")
-        raise HTTPException(
-            status_code=409, 
-            detail="Scraping process is in an inconsistent state. Please wait a moment and try again."
-        )
     
     scraping_status["should_stop"] = True
     scraping_status["status_message"] = "Stopping scraping process..."
     
     return {"message": "Stop signal sent to scraping process"}
+
+@app.get("/api/bandcamp/tracks")
+async def get_bandcamp_tracks(url: str):
+    """
+    Extract track URLs from a Bandcamp album page.
+    Returns direct MP3 URLs for playback without cookie popups.
+    """
+    try:
+        from playwright.async_api import async_playwright
+        from platform_verifier import PlatformVerifier
+        
+        logger.info(f"🎵 Extracting Bandcamp tracks from: {url}")
+        
+        # Launch browser and extract tracks
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
+            
+            # Enable console logging from the page
+            page.on("console", lambda msg: logger.info(f"Browser console: {msg.text}"))
+            
+            verifier = PlatformVerifier(page)
+            track_data = await verifier.extract_bandcamp_tracks(url)
+            
+            await browser.close()
+        
+        logger.info(f"Track extraction result: found={track_data.get('found')}, tracks={len(track_data.get('tracks', []))}")
+        
+        if not track_data.get('found'):
+            error_msg = track_data.get('error', 'Could not extract tracks from Bandcamp page')
+            logger.error(f"❌ Track extraction failed: {error_msg}")
+            raise HTTPException(status_code=404, detail=error_msg)
+        
+        logger.info(f"✓ Successfully extracted {len(track_data['tracks'])} tracks")
+        return track_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error extracting Bandcamp tracks: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/verify-playable")
+async def verify_playable_urls(
+    start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
+    min_similarity: int = Query(75, description="Minimum fuzzy match score (0-100)"),
+    background_tasks: BackgroundTasks = None,
+    token: str = Depends(verify_admin_token)
+):
+    """
+    Verify playable URLs for albums in date range.
+    This runs in the background and updates albums with embed URLs.
+    """
+    from batch_verifier import BatchVerifier
+    
+    async def run_verification():
+        verifier = BatchVerifier(db, headless=True)
+        try:
+            await verifier.initialize()
+            stats = await verifier.verify_date_range(start_date, end_date, min_similarity)
+            logger.info(f"Verification complete: {stats}")
+        except Exception as e:
+            logger.error(f"Verification error: {e}")
+        finally:
+            await verifier.close()
+    
+    # Run in background
+    if background_tasks:
+        background_tasks.add_task(run_verification)
+    else:
+        # Fallback: run synchronously
+        await run_verification()
+    
+    return {
+        "message": "Playable URL verification started",
+        "date_range": f"{start_date} to {end_date}",
+        "min_similarity": min_similarity
+    }
 
 @app.delete("/api/admin/data/{date}")
 async def delete_data_by_date(date: str, token: str = Depends(verify_admin_token)):
@@ -1081,6 +1183,367 @@ async def admin_login(request: LoginRequest):
 async def verify_token_endpoint(token: str = Depends(verify_admin_token)):
     """Verify if token is valid (protected endpoint)"""
     return {"valid": True, "message": "Token is valid"}
+
+# ============================================================================
+# PLAYLIST ENDPOINTS
+# ============================================================================
+
+@app.get("/api/playlists")
+async def get_playlists():
+    """Get all playlists."""
+    try:
+        playlists = db.get_all_playlists()
+        return {"playlists": playlists}
+    except Exception as e:
+        logger.error(f"Error fetching playlists: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch playlists")
+
+@app.get("/api/playlists/{playlist_id}")
+async def get_playlist(playlist_id: int):
+    """Get playlist details with items."""
+    try:
+        playlist = db.get_playlist(playlist_id)
+        if not playlist:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+        return playlist
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching playlist {playlist_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch playlist")
+
+@app.post("/api/playlists")
+async def create_playlist(request: PlaylistCreate):
+    """Create new playlist."""
+    try:
+        playlist_id = db.create_playlist(
+            name=request.name,
+            description=request.description,
+            is_public=request.is_public
+        )
+        return {"id": playlist_id, "name": request.name, "message": "Playlist created successfully"}
+    except Exception as e:
+        logger.error(f"Error creating playlist: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create playlist")
+
+@app.put("/api/playlists/{playlist_id}")
+async def update_playlist(playlist_id: int, request: PlaylistUpdate):
+    """Update playlist metadata."""
+    try:
+        success = db.update_playlist(
+            playlist_id=playlist_id,
+            name=request.name,
+            description=request.description,
+            is_public=request.is_public
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+        return {"success": True, "message": "Playlist updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating playlist: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update playlist")
+
+@app.delete("/api/playlists/{playlist_id}")
+async def delete_playlist(playlist_id: int):
+    """Delete playlist."""
+    try:
+        success = db.delete_playlist(playlist_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+        return {"success": True, "message": "Playlist deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting playlist: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete playlist")
+
+@app.post("/api/playlists/{playlist_id}/items")
+async def add_playlist_item(
+    playlist_id: int, 
+    request: PlaylistItemCreate,
+    background_tasks: BackgroundTasks
+):
+    """
+    Add item to playlist with verification.
+    Verifies that the platform link contains the album using fuzzy matching.
+    """
+    try:
+        # Check if playlist exists
+        playlist = db.get_playlist(playlist_id)
+        if not playlist:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+        
+        # Get album details
+        album = db.get_album_by_id(request.album_id)
+        if not album:
+            raise HTTPException(status_code=404, detail="Album not found")
+        
+        # Get the platform URL
+        platform_url = album.get(f'{request.platform}_url')
+        if not platform_url or platform_url == 'N/A' or platform_url == '':
+            raise HTTPException(
+                status_code=400, 
+                detail=f"No {request.platform} link available for this album"
+            )
+        
+        # Initialize scraper for verification
+        scraper = MetalArchivesScraper(headless=True)
+        await scraper.initialize()
+        
+        try:
+            # Create verifier
+            verifier = PlatformVerifier(scraper.page)
+            
+            # Verify based on platform
+            if request.platform == 'youtube':
+                result = await verifier.verify_youtube_album(
+                    youtube_url=platform_url,
+                    album_name=album['album_name'],
+                    band_name=album['band_name'],
+                    min_similarity=75  # Configurable threshold
+                )
+            elif request.platform == 'bandcamp':
+                result = await verifier.verify_bandcamp_album(
+                    bandcamp_url=platform_url,
+                    album_name=album['album_name'],
+                    album_type=album.get('type', 'album'),
+                    min_similarity=75
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Platform '{request.platform}' not supported for playback. Only 'youtube' and 'bandcamp' are supported."
+                )
+            
+            # Check if album was found
+            if not result.get('found'):
+                error_msg = result.get('error', 'Album not found on platform')
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Album not found on {request.platform}. {error_msg}"
+                )
+            
+            # Add to playlist with verified URL
+            item_id = db.add_playlist_item_verified(
+                playlist_id=playlist_id,
+                album_id=request.album_id,
+                platform=request.platform,
+                playable_url=result['embed_url'],
+                verification_status='verified',
+                verification_score=result['match_score'],
+                verified_title=result['title'],
+                embed_type=result.get('type', 'video'),
+                track_number=request.track_number
+            )
+            
+            return {
+                "id": item_id,
+                "verified": True,
+                "match_score": result['match_score'],
+                "found_title": result['title'],
+                "embed_url": result['embed_url'],
+                "message": f"Added to playlist (Match: {result['match_score']}%)"
+            }
+            
+        finally:
+            await scraper.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding playlist item: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/playlists/{playlist_id}/items/{item_id}")
+async def delete_playlist_item(playlist_id: int, item_id: int):
+    """Remove item from playlist."""
+    try:
+        success = db.delete_playlist_item(playlist_id, item_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Playlist item not found")
+        return {"success": True, "message": "Item removed from playlist"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting playlist item: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete item")
+
+@app.put("/api/playlists/{playlist_id}/reorder")
+async def reorder_playlist(playlist_id: int, request: ReorderRequest):
+    """Reorder playlist items."""
+    try:
+        success = db.reorder_playlist_items(playlist_id, request.item_ids)
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to reorder items")
+        return {"success": True, "message": "Playlist reordered successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reordering playlist: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reorder playlist")
+
+@app.get("/api/albums/{album_id}/playable-links")
+async def get_playable_links(album_id: str):
+    """Get all playable links for an album."""
+    try:
+        album = db.get_album_by_id(album_id)
+        if not album:
+            raise HTTPException(status_code=404, detail="Album not found")
+        
+        links = {}
+        
+        # Check YouTube
+        if album.get('youtube_url') and album['youtube_url'] != 'N/A':
+            links['youtube'] = {
+                'available': True,
+                'url': album['youtube_url']
+            }
+        else:
+            links['youtube'] = {'available': False}
+        
+        # Check Bandcamp
+        if album.get('bandcamp_url') and album['bandcamp_url'] != 'N/A':
+            links['bandcamp'] = {
+                'available': True,
+                'url': album['bandcamp_url']
+            }
+        else:
+            links['bandcamp'] = {'available': False}
+        
+        return {
+            "album_id": album_id,
+            "album_name": album['album_name'],
+            "band_name": album['band_name'],
+            "playable_links": links
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting playable links: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get playable links")
+
+@app.get("/api/playlist/dynamic")
+async def get_dynamic_playlist(
+    period_type: str = Query(..., description="day, week, or month"),
+    period_key: str = Query(..., description="Date or period identifier"),
+    genres: Optional[str] = Query(None, description="Comma-separated genre filters"),
+    search: Optional[str] = Query(None, description="Search query"),
+    shuffle: bool = Query(False, description="Shuffle playlist order")
+):
+    """
+    Generate dynamic playlist for a period with filters.
+    Returns albums with verified playable URLs ready for sidebar player.
+    """
+    logger.info(f"🎵 Dynamic playlist request: {period_type} = {period_key}")
+    logger.info(f"   Filters: genres={genres}, search={search}, shuffle={shuffle}")
+    
+    try:
+        # Parse genre filters
+        genre_filters = [g.strip() for g in genres.split(',')] if genres else None
+        
+        # Calculate date range based on period type
+        if period_type == 'day':
+            albums = db.get_albums_for_dynamic_playlist(
+                release_date=period_key,
+                genre_filters=genre_filters,
+                search_query=search,
+                only_playable=True
+            )
+        elif period_type == 'week':
+            # Period key format: "2024-W01"
+            from datetime import datetime, timedelta
+            year, week = period_key.split('-W')
+            # Calculate start and end of week
+            first_day = datetime.strptime(f'{year}-W{week}-1', '%Y-W%W-%w')
+            last_day = first_day + timedelta(days=6)
+            
+            albums = db.get_albums_for_dynamic_playlist(
+                start_date=first_day.strftime('%Y-%m-%d'),
+                end_date=last_day.strftime('%Y-%m-%d'),
+                genre_filters=genre_filters,
+                search_query=search,
+                only_playable=True
+            )
+        elif period_type == 'month':
+            # Period key format: "2024-01"
+            from datetime import datetime
+            from calendar import monthrange
+            year, month = map(int, period_key.split('-'))
+            last_day = monthrange(year, month)[1]
+            
+            albums = db.get_albums_for_dynamic_playlist(
+                start_date=f'{year}-{month:02d}-01',
+                end_date=f'{year}-{month:02d}-{last_day:02d}',
+                genre_filters=genre_filters,
+                search_query=search,
+                only_playable=True
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid period_type. Must be day, week, or month")
+        
+        # Shuffle if requested
+        if shuffle:
+            import random
+            random.shuffle(albums)
+        
+        # Transform to playable format
+        playlist_items = []
+        for album in albums:
+            item = {
+                'album_id': album['album_id'],
+                'title': album['album_name'],
+                'artist': album['band_name'],
+                'type': album.get('type', 'Full-length'),
+                'release_date': album['release_date'],
+                'cover_art': album.get('cover_art'),
+                'cover_path': album.get('cover_path'),
+                'album_url': album.get('album_url'),
+                'platforms': {}
+            }
+            
+            # Add YouTube embed if available
+            if album.get('youtube_embed_url'):
+                item['platforms']['youtube'] = {
+                    'embed_url': album['youtube_embed_url'],
+                    'verified_title': album.get('youtube_verified_title'),
+                    'verification_score': album.get('youtube_verification_score'),
+                    'embed_type': album.get('youtube_embed_type', 'video')
+                }
+            
+            # Add Bandcamp embed if available
+            if album.get('bandcamp_embed_url'):
+                item['platforms']['bandcamp'] = {
+                    'embed_url': album['bandcamp_embed_url'],
+                    'verified_title': album.get('bandcamp_verified_title'),
+                    'verification_score': album.get('bandcamp_verification_score')
+                }
+            
+            # Only include if at least one platform is available
+            if item['platforms']:
+                playlist_items.append(item)
+        
+        logger.info(f"   ✓ Returning {len(playlist_items)} playable items out of {len(albums)} total albums")
+        
+        return {
+            'period_type': period_type,
+            'period_key': period_key,
+            'total_albums': len(playlist_items),
+            'filters': {
+                'genres': genre_filters,
+                'search': search,
+                'shuffle': shuffle
+            },
+            'items': playlist_items
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating dynamic playlist: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate playlist: {str(e)}")
 
 # Serve React frontend (will be created next)
 @app.get("/")

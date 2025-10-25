@@ -2,6 +2,118 @@
                         METAL ALBUMS - CHANGELOG
 ================================================================================
 
+Version: October 25, 2025
+================================================================================
+
+🎵 NEW FEATURE: Dynamic Playlist System with Sidebar Player
+--------------------------------------------------------------------------------
+
+Complete playlist system with auto-verification and unified player for YouTube
+and Bandcamp embeds. Play entire periods (day/week/month) with filters applied!
+
+✨ What's New:
+
+  Backend:
+  • Platform Verification Module (platform_verifier.py)
+    - Fuzzy matching algorithm to verify album presence on YouTube/Bandcamp
+    - Extracts embed URLs automatically during verification
+    - Configurable similarity threshold (default: 75%)
+  
+  • Database Schema Updates
+    - Added verified embed URL fields to albums table
+    - Stores YouTube embed URLs, titles, and verification scores
+    - Stores Bandcamp embed URLs and embed codes
+    - Tracks verification status and date
+  
+  • Batch Verification System (batch_verifier.py)
+    - Verify multiple albums efficiently with rate limiting
+    - **Automatic verification after scraping** (runs automatically!)
+    - Manual verification via CLI: verify_albums.py
+    - Admin endpoint: POST /api/admin/verify-playable
+  
+  • Dynamic Playlist API
+    - GET /api/playlist/dynamic - Generate playlists on-demand
+    - Supports day/week/month periods with genre/search filters
+    - Returns only albums with verified playable URLs
+    - Optional shuffle mode
+  
+  Frontend:
+  • Sidebar Player Component (SidebarPlayer.tsx)
+    - 400px persistent drawer on the right side
+    - Displays album cover, title, artist, and type
+    - Embeds both YouTube and Bandcamp players
+    - Platform toggle when both are available
+    - Play/pause, next/previous controls
+    - Progress indicator and track counter
+    - Shuffle mode support
+  
+  • Playlist Hook (usePlaylist.ts)
+    - Easy integration into existing views
+    - Handles loading, error states
+    - Manages player open/close state
+  
+  • PlaylistButton Component
+    - "Play All" button for period views
+    - Shows loading state during playlist generation
+    - Respects current filters (genres, search)
+  
+  • TypeScript Interfaces (types/playlist.ts)
+    - Full type safety for playlist data
+    - Platform embed definitions
+    - Player state management
+
+📋 Usage:
+
+  1. Scrape albums (verification runs automatically!):
+     - Use admin panel to scrape a date
+     - System automatically verifies playable URLs after scraping
+     - No manual verification needed for new scrapes!
+     
+     For existing albums, manually verify:
+     python verify_albums.py --date 2025-10-07
+     python verify_albums.py --start 2025-10-01 --end 2025-10-07
+     python verify_albums.py --all
+     
+     Or via API:
+     POST /api/admin/verify-playable?start_date=2024-01-01&end_date=2024-01-31
+  
+  2. Add Play button to your views:
+     <PlaylistButton
+       periodType="week"
+       periodKey="2024-W01"
+       genres={selectedGenres}
+       onClick={loadPlaylist}
+     />
+  
+  3. Include SidebarPlayer:
+     <SidebarPlayer
+       open={isPlayerOpen}
+       onClose={closePlayer}
+       playlist={playlist}
+     />
+
+🔧 Technical Details:
+
+  • Fuzzy Matching: Uses fuzzywuzzy + python-Levenshtein
+  • Verification Strategy: Batch processing with 2s delay between albums
+  • Player Architecture: Dual iframe system (YouTube + Bandcamp)
+  • State Management: React hooks with TypeScript
+  • Performance: Only verified albums loaded, lazy verification possible
+
+⚠️ Important Notes:
+
+  • Albums must be verified before they appear in playlists
+  • Verification is a one-time process per album
+  • Run verification after scraping new dates
+  • Min similarity threshold can be adjusted (50-100)
+
+📦 Dependencies Added:
+
+  • fuzzywuzzy==0.18.0
+  • python-Levenshtein==0.21.1
+
+================================================================================
+
 Version: October 7, 2025
 ================================================================================
 

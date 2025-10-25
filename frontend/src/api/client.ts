@@ -12,6 +12,7 @@ import {
   PeriodsResponse,
   PeriodAlbumsResponse
 } from '../types';
+import { DynamicPlaylist } from '../types/playlist';
 
 // Auth-related types
 export interface AuthStatus {
@@ -205,6 +206,37 @@ export const api = {
   // Settings endpoints
   getPlatformLinkSettings: async (): Promise<{ settings: { [key: string]: boolean } }> => {
     const response = await apiClient.get('/api/settings/platform-links');
+    return response.data;
+  },
+
+  // Playlist endpoints
+  getDynamicPlaylist: async (
+    periodType: 'day' | 'week' | 'month',
+    periodKey: string,
+    options?: {
+      genres?: string[];
+      search?: string;
+      shuffle?: boolean;
+    }
+  ): Promise<DynamicPlaylist> => {
+    const params: any = {
+      period_type: periodType,
+      period_key: periodKey,
+    };
+    
+    if (options?.genres && options.genres.length > 0) {
+      params.genres = options.genres.join(',');
+    }
+    
+    if (options?.search) {
+      params.search = options.search;
+    }
+    
+    if (options?.shuffle) {
+      params.shuffle = true;
+    }
+    
+    const response = await apiClient.get<DynamicPlaylist>('/api/playlist/dynamic', { params });
     return response.data;
   },
 

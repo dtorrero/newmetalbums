@@ -88,3 +88,77 @@ class Album(BaseModel):
             tracklist=tracks,
             details=data.get('details', {})
         )
+
+# ============================================================================
+# PLAYLIST MODELS
+# ============================================================================
+
+class PlaylistCreate(BaseModel):
+    """Model for creating a new playlist."""
+    name: str
+    description: Optional[str] = None
+    is_public: bool = True
+
+class PlaylistUpdate(BaseModel):
+    """Model for updating playlist metadata."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_public: Optional[bool] = None
+
+class PlaylistItemCreate(BaseModel):
+    """Model for adding item to playlist."""
+    album_id: str
+    track_number: Optional[str] = None
+    platform: str  # 'youtube' or 'bandcamp'
+
+class PlaylistItemResponse(BaseModel):
+    """Model for playlist item with album details."""
+    id: int
+    album_id: str
+    album_name: str
+    band_name: str
+    track_number: Optional[str] = None
+    track_name: Optional[str] = None
+    platform: str
+    playable_url: Optional[str] = None
+    position: int
+    cover_art: Optional[str] = None
+    cover_path: Optional[str] = None
+    verification_status: str
+    verification_score: Optional[int] = None
+    verified_title: Optional[str] = None
+    embed_type: Optional[str] = None
+
+class PlaylistResponse(BaseModel):
+    """Model for playlist with metadata."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    is_public: bool
+    item_count: int
+    created_at: str
+    updated_at: str
+    items: Optional[List[PlaylistItemResponse]] = None
+
+class PlayableItem(BaseModel):
+    """Optimized format for frontend player."""
+    id: int
+    title: str  # Track or album name
+    artist: str  # Band name
+    platform: str
+    embed_url: str
+    duration: Optional[str] = None
+    cover_art: Optional[str] = None
+    album_url: str  # Link to album page
+    verification_score: Optional[int] = None
+
+class PlayablePlaylist(BaseModel):
+    """Playlist in playable format for frontend."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    items: List[PlayableItem]
+
+class ReorderRequest(BaseModel):
+    """Model for reordering playlist items."""
+    item_ids: List[int]

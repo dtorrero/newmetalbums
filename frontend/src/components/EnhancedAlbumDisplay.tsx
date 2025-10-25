@@ -48,6 +48,9 @@ import { api } from '../api/client';
 import { AlbumWithGenres } from '../types';
 import { groupGenres, albumMatchesGenreGroups, GenreGroup, GenreHierarchy } from '../utils/genreGrouping';
 import PlatformLinks from './PlatformLinks';
+import { usePlaylist } from '../hooks/usePlaylist';
+import { PlaylistButton } from './PlaylistButton';
+import { SidebarPlayer } from './SidebarPlayer';
 
 interface GenreFilter {
   genre: string;
@@ -76,6 +79,7 @@ const EnhancedAlbumDisplay: React.FC = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [totalAlbums, setTotalAlbums] = useState(0);
   const [periodInfo, setPeriodInfo] = useState<{ start_date: string; end_date: string } | null>(null);
+  const { playlist, isPlayerOpen, loading: playlistLoading, error: playlistError, loadPlaylist, closePlayer } = usePlaylist();
   const [imageDialog, setImageDialog] = useState<{
     open: boolean;
     imageUrl: string;
@@ -330,19 +334,43 @@ const EnhancedAlbumDisplay: React.FC = () => {
     <Container maxWidth="xl">
       <Box py={4}>
         {/* Header */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
           <Button startIcon={<ArrowBack />} onClick={() => navigate('/')} variant="outlined">
             Back to Dates
           </Button>
-          <Button
-            startIcon={<FilterList />}
-            onClick={() => setFilterDrawerOpen(true)}
-            variant="contained"
-            color="secondary"
-          >
-            Filter ({selectedGenreCount}/{totalGenreGroups})
-          </Button>
+          
+          <Box display="flex" gap={2} flexWrap="wrap">
+            {/* Play All Button */}
+            {(periodType || date) && (
+              <PlaylistButton
+                periodType={(periodType as 'day' | 'week' | 'month') || 'day'}
+                periodKey={periodKey || date || ''}
+                genres={selectedGenreGroups}
+                search={searchQuery}
+                loading={playlistLoading}
+                onClick={loadPlaylist}
+                variant="contained"
+                size="medium"
+              />
+            )}
+            
+            <Button
+              startIcon={<FilterList />}
+              onClick={() => setFilterDrawerOpen(true)}
+              variant="contained"
+              color="secondary"
+            >
+              Filter ({selectedGenreCount}/{totalGenreGroups})
+            </Button>
+          </Box>
         </Box>
+        
+        {/* Playlist Error */}
+        {playlistError && (
+          <Alert severity="warning" sx={{ mb: 2 }} onClose={() => {}}>
+            {playlistError}
+          </Alert>
+        )}
 
         <Typography variant="h4" component="h1" gutterBottom>
           🤘 {periodType && periodInfo ? formatPeriodTitle() : `Albums Released on ${date}`}
@@ -763,6 +791,13 @@ const EnhancedAlbumDisplay: React.FC = () => {
             />
           </DialogContent>
         </Dialog>
+        
+        {/* Sidebar Player */}
+        <SidebarPlayer
+          open={isPlayerOpen}
+          onClose={closePlayer}
+          playlist={playlist}
+        />
       </Box>
     </Container>
   );

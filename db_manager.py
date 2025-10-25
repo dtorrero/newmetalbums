@@ -8,7 +8,7 @@ import sqlite3
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 import glob
 
@@ -57,6 +57,16 @@ class AlbumsDatabase:
                 lastfm_url TEXT,
                 soundcloud_url TEXT,
                 tidal_url TEXT,
+                youtube_embed_url TEXT,
+                youtube_verified_title TEXT,
+                youtube_verification_score INTEGER,
+                youtube_embed_type TEXT,
+                bandcamp_embed_url TEXT,
+                bandcamp_verified_title TEXT,
+                bandcamp_verification_score INTEGER,
+                bandcamp_embed_code TEXT,
+                playable_verified BOOLEAN DEFAULT 0,
+                playable_verification_date TIMESTAMP,
                 country_of_origin TEXT,
                 location TEXT,
                 genre TEXT,
@@ -147,8 +157,93 @@ class AlbumsDatabase:
             )
         ''')
         
+        # Playlists table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                user_id TEXT,
+                is_public BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Playlist items table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS playlist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id INTEGER NOT NULL,
+                album_id TEXT NOT NULL,
+                track_number TEXT,
+                position INTEGER NOT NULL,
+                platform TEXT NOT NULL,
+                playable_url TEXT,
+                verification_status TEXT DEFAULT 'pending',
+                verification_score INTEGER,
+                verified_title TEXT,
+                verification_date TIMESTAMP,
+                embed_type TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+                FOREIGN KEY (album_id) REFERENCES albums(album_id)
+            )
+        ''')
+        
+        # Create playlist indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON playlist_items(playlist_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_playlist_items_position ON playlist_items(playlist_id, position)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_playlist_items_album_id ON playlist_items(album_id)')
+        
         self.connection.commit()
         logger.info("Database tables created successfully")
+        
+        # Run migrations for existing databases
+        self._run_migrations()
+    
+    def _run_migrations(self):
+        """Apply database migrations for new fields"""
+        cursor = self.connection.cursor()
+        
+        # Check if new playable fields exist
+        cursor.execute("PRAGMA table_info(albums)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        migrations_needed = []
+        
+        # List of new columns to add
+        new_columns = {
+            'youtube_embed_url': 'TEXT',
+            'youtube_verified_title': 'TEXT',
+            'youtube_verification_score': 'INTEGER',
+            'youtube_embed_type': 'TEXT',
+            'bandcamp_embed_url': 'TEXT',
+            'bandcamp_verified_title': 'TEXT',
+            'bandcamp_verification_score': 'INTEGER',
+            'bandcamp_embed_code': 'TEXT',
+            'playable_verified': 'BOOLEAN DEFAULT 0',
+            'playable_verification_date': 'TIMESTAMP'
+        }
+        
+        for column_name, column_type in new_columns.items():
+            if column_name not in columns:
+                migrations_needed.append((column_name, column_type))
+        
+        if migrations_needed:
+            logger.info(f"Running migrations: adding {len(migrations_needed)} new columns to albums table")
+            for column_name, column_type in migrations_needed:
+                try:
+                    cursor.execute(f'ALTER TABLE albums ADD COLUMN {column_name} {column_type}')
+                    logger.info(f"  ✓ Added column: {column_name}")
+                except sqlite3.OperationalError as e:
+                    # Column might already exist in some edge cases
+                    logger.warning(f"  ⚠ Could not add {column_name}: {e}")
+            
+            self.connection.commit()
+            logger.info("✓ Database migrations completed successfully")
+        else:
+            logger.info("✓ Database schema is up to date")
     
     def insert_album(self, album_data: Dict[str, Any]) -> bool:
         """Insert album data into database"""
@@ -802,6 +897,365 @@ class AlbumsDatabase:
             }
             for row in results
         }
+    
+    # ============================================================================
+    # PLAYLIST MANAGEMENT METHODS
+    # ============================================================================
+    
+    def create_playlist(self, name: str, description: str = None, is_public: bool = True) -> int:
+        """Create a new playlist."""
+        cursor = self.connection.cursor()
+        cursor.execute('''
+            INSERT INTO playlists (name, description, is_public, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (name, description, is_public))
+        self.connection.commit()
+        return cursor.lastrowid
+    
+    def get_playlist(self, playlist_id: int) -> Optional[Dict]:
+        """Get playlist with items."""
+        cursor = self.connection.cursor()
+        
+        # Get playlist metadata
+        cursor.execute('''
+            SELECT id, name, description, is_public, created_at, updated_at,
+                   (SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ?) as item_count
+            FROM playlists WHERE id = ?
+        ''', (playlist_id, playlist_id))
+        
+        playlist = cursor.fetchone()
+        if not playlist:
+            return None
+        
+        # Get playlist items with album details
+        cursor.execute('''
+            SELECT 
+                pi.id, pi.album_id, pi.track_number, pi.platform, 
+                pi.playable_url, pi.position, pi.verification_status,
+                pi.verification_score, pi.verified_title, pi.embed_type,
+                a.album_name, a.band_name, a.cover_art, a.cover_path,
+                a.youtube_url, a.bandcamp_url, a.type
+            FROM playlist_items pi
+            JOIN albums a ON pi.album_id = a.album_id
+            WHERE pi.playlist_id = ?
+            ORDER BY pi.position
+        ''', (playlist_id,))
+        
+        items = [dict(row) for row in cursor.fetchall()]
+        
+        result = dict(playlist)
+        result['items'] = items
+        return result
+    
+    def get_all_playlists(self) -> List[Dict]:
+        """Get all playlists with counts."""
+        cursor = self.connection.cursor()
+        cursor.execute('''
+            SELECT 
+                p.id, p.name, p.description, p.is_public, 
+                p.created_at, p.updated_at,
+                COUNT(pi.id) as item_count
+            FROM playlists p
+            LEFT JOIN playlist_items pi ON p.id = pi.playlist_id
+            GROUP BY p.id
+            ORDER BY p.updated_at DESC
+        ''')
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def update_playlist(self, playlist_id: int, name: str = None, 
+                       description: str = None, is_public: bool = None) -> bool:
+        """Update playlist metadata."""
+        cursor = self.connection.cursor()
+        
+        updates = []
+        params = []
+        
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if is_public is not None:
+            updates.append("is_public = ?")
+            params.append(is_public)
+        
+        if not updates:
+            return False
+        
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(playlist_id)
+        
+        query = f"UPDATE playlists SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(query, params)
+        self.connection.commit()
+        return cursor.rowcount > 0
+    
+    def delete_playlist(self, playlist_id: int) -> bool:
+        """Delete playlist (items cascade automatically)."""
+        cursor = self.connection.cursor()
+        cursor.execute('DELETE FROM playlists WHERE id = ?', (playlist_id,))
+        self.connection.commit()
+        return cursor.rowcount > 0
+    
+    def add_playlist_item_verified(
+        self, 
+        playlist_id: int, 
+        album_id: str, 
+        platform: str, 
+        playable_url: str,
+        verification_status: str = 'verified',
+        verification_score: int = None,
+        verified_title: str = None,
+        embed_type: str = None,
+        track_number: str = None
+    ) -> int:
+        """Add verified item to playlist."""
+        cursor = self.connection.cursor()
+        
+        # Get next position
+        cursor.execute('''
+            SELECT COALESCE(MAX(position), 0) + 1 
+            FROM playlist_items WHERE playlist_id = ?
+        ''', (playlist_id,))
+        position = cursor.fetchone()[0]
+        
+        cursor.execute('''
+            INSERT INTO playlist_items 
+            (playlist_id, album_id, track_number, platform, playable_url, position,
+             verification_status, verification_score, verified_title, embed_type, verification_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (playlist_id, album_id, track_number, platform, playable_url, position,
+              verification_status, verification_score, verified_title, embed_type))
+        
+        # Update playlist timestamp
+        cursor.execute('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (playlist_id,))
+        
+        self.connection.commit()
+        return cursor.lastrowid
+    
+    def add_playlist_item_pending(
+        self, 
+        playlist_id: int, 
+        album_id: str, 
+        platform: str,
+        track_number: str = None
+    ) -> int:
+        """Add item to playlist with pending verification status."""
+        cursor = self.connection.cursor()
+        
+        # Get next position
+        cursor.execute('''
+            SELECT COALESCE(MAX(position), 0) + 1 
+            FROM playlist_items WHERE playlist_id = ?
+        ''', (playlist_id,))
+        position = cursor.fetchone()[0]
+        
+        cursor.execute('''
+            INSERT INTO playlist_items 
+            (playlist_id, album_id, track_number, platform, position, verification_status)
+            VALUES (?, ?, ?, ?, ?, 'pending')
+        ''', (playlist_id, album_id, track_number, platform, position))
+        
+        self.connection.commit()
+        return cursor.lastrowid
+    
+    def update_playlist_item_verification(
+        self,
+        item_id: int,
+        verification_status: str,
+        playable_url: str = None,
+        verification_score: int = None,
+        verified_title: str = None,
+        embed_type: str = None
+    ) -> bool:
+        """Update verification status of a playlist item."""
+        cursor = self.connection.cursor()
+        
+        cursor.execute('''
+            UPDATE playlist_items 
+            SET verification_status = ?,
+                playable_url = ?,
+                verification_score = ?,
+                verified_title = ?,
+                embed_type = ?,
+                verification_date = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (verification_status, playable_url, verification_score, 
+              verified_title, embed_type, item_id))
+        
+        self.connection.commit()
+        return cursor.rowcount > 0
+    
+    def delete_playlist_item(self, playlist_id: int, item_id: int) -> bool:
+        """Remove item from playlist."""
+        cursor = self.connection.cursor()
+        cursor.execute('''
+            DELETE FROM playlist_items 
+            WHERE id = ? AND playlist_id = ?
+        ''', (item_id, playlist_id))
+        
+        # Update playlist timestamp
+        if cursor.rowcount > 0:
+            cursor.execute('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (playlist_id,))
+        
+        self.connection.commit()
+        return cursor.rowcount > 0
+    
+    def reorder_playlist_items(self, playlist_id: int, item_ids: List[int]) -> bool:
+        """Reorder playlist items."""
+        cursor = self.connection.cursor()
+        
+        try:
+            for position, item_id in enumerate(item_ids, start=1):
+                cursor.execute('''
+                    UPDATE playlist_items 
+                    SET position = ? 
+                    WHERE id = ? AND playlist_id = ?
+                ''', (position, item_id, playlist_id))
+            
+            # Update playlist timestamp
+            cursor.execute('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (playlist_id,))
+            
+            self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error reordering playlist items: {e}")
+            self.connection.rollback()
+            return False
+    
+    def get_album_by_id(self, album_id: str) -> Optional[Dict]:
+        """Get album details by ID."""
+        cursor = self.connection.cursor()
+        cursor.execute('''
+            SELECT 
+                album_id, album_name, band_name, type, release_date,
+                cover_art, cover_path, youtube_url, bandcamp_url,
+                spotify_url, discogs_url, lastfm_url, soundcloud_url, tidal_url,
+                youtube_embed_url, youtube_verified_title, youtube_verification_score,
+                bandcamp_embed_url, bandcamp_verified_title, bandcamp_verification_score,
+                playable_verified
+            FROM albums WHERE album_id = ?
+        ''', (album_id,))
+        
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    
+    def update_album_playable_urls(
+        self,
+        album_id: str,
+        youtube_result: Optional[Dict] = None,
+        bandcamp_result: Optional[Dict] = None
+    ) -> bool:
+        """Update album with verified playable URLs."""
+        cursor = self.connection.cursor()
+        
+        updates = []
+        params = []
+        
+        if youtube_result and youtube_result.get('found'):
+            updates.extend([
+                "youtube_embed_url = ?",
+                "youtube_verified_title = ?",
+                "youtube_verification_score = ?",
+                "youtube_embed_type = ?"
+            ])
+            params.extend([
+                youtube_result.get('embed_url'),
+                youtube_result.get('title'),
+                youtube_result.get('match_score'),
+                youtube_result.get('type')
+            ])
+        
+        if bandcamp_result and bandcamp_result.get('found'):
+            updates.extend([
+                "bandcamp_embed_url = ?",
+                "bandcamp_verified_title = ?",
+                "bandcamp_verification_score = ?",
+                "bandcamp_embed_code = ?"
+            ])
+            params.extend([
+                bandcamp_result.get('embed_url'),
+                bandcamp_result.get('title'),
+                bandcamp_result.get('match_score'),
+                bandcamp_result.get('embed_code', '')
+            ])
+        
+        if updates:
+            updates.append("playable_verified = 1")
+            updates.append("playable_verification_date = CURRENT_TIMESTAMP")
+            params.append(album_id)
+            
+            query = f"UPDATE albums SET {', '.join(updates)} WHERE album_id = ?"
+            cursor.execute(query, params)
+            self.connection.commit()
+            return cursor.rowcount > 0
+        
+        return False
+    
+    def get_albums_for_dynamic_playlist(
+        self,
+        release_date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        genre_filters: Optional[List[str]] = None,
+        search_query: Optional[str] = None,
+        only_playable: bool = True
+    ) -> List[Dict]:
+        """Get albums for dynamic playlist generation with filters."""
+        logger.info(f"🎵 Getting albums for playlist - Date: {release_date}, Range: {start_date} to {end_date}")
+        logger.info(f"   Filters - Genres: {genre_filters}, Search: {search_query}, Only Playable: {only_playable}")
+        
+        cursor = self.connection.cursor()
+        
+        query = '''
+            SELECT 
+                album_id, album_name, band_name, type, release_date,
+                cover_art, cover_path, album_url,
+                youtube_embed_url, youtube_verified_title, youtube_verification_score, youtube_embed_type,
+                bandcamp_embed_url, bandcamp_verified_title, bandcamp_verification_score,
+                playable_verified
+            FROM albums
+            WHERE 1=1
+        '''
+        params = []
+        
+        # Date filtering
+        if release_date:
+            query += " AND release_date = ?"
+            params.append(release_date)
+        elif start_date and end_date:
+            query += " AND release_date BETWEEN ? AND ?"
+            params.extend([start_date, end_date])
+        
+        # Only include albums with playable links
+        if only_playable:
+            query += " AND playable_verified = 1"
+            query += " AND (youtube_embed_url IS NOT NULL OR bandcamp_embed_url IS NOT NULL)"
+        
+        # Genre filtering
+        if genre_filters and len(genre_filters) > 0:
+            genre_conditions = " OR ".join(["genre LIKE ?" for _ in genre_filters])
+            query += f" AND ({genre_conditions})"
+            params.extend([f"%{genre}%" for genre in genre_filters])
+        
+        # Search query
+        if search_query:
+            query += " AND (album_name LIKE ? OR band_name LIKE ?)"
+            search_pattern = f"%{search_query}%"
+            params.extend([search_pattern, search_pattern])
+        
+        query += " ORDER BY release_date DESC, band_name ASC"
+        
+        logger.info(f"   Executing query with {len(params)} parameters")
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+        
+        logger.info(f"   ✓ Found {len(results)} total albums")
+        playable_count = sum(1 for r in results if r.get('youtube_embed_url') or r.get('bandcamp_embed_url'))
+        logger.info(f"   ✓ {playable_count} albums have playable URLs")
+        
+        return results
 
 def ingest_json_files(db: AlbumsDatabase, json_pattern: str = "data/albums_*.json"):
     """Ingest all JSON files matching pattern into database"""
