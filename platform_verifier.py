@@ -19,6 +19,140 @@ class PlatformVerifier:
     def __init__(self, page: Page):
         self.page = page
         
+    async def search_youtube_directly(
+        self,
+        album_name: str,
+        band_name: str,
+        min_similarity: int = 75
+    ) -> Dict[str, any]:
+        """
+        Search YouTube directly for an album instead of using band channel.
+        This is more reliable as it doesn't depend on band channel URLs.
+        
+        Args:
+            album_name: Album name to search for
+            band_name: Band name for better matching
+            min_similarity: Minimum fuzzy match score (0-100)
+        
+        Returns:
+            {
+                'found': bool,
+                'video_url': str,
+                'embed_url': str,
+                'match_score': int,
+                'title': str,
+                'type': str  # 'video' or 'playlist'
+            }
+        """
+        try:
+            # Construct search query
+            search_query = f"{band_name} {album_name} full album"
+            search_url = f"https://www.youtube.com/results?search_query={search_query.replace(' ', '+')}"
+            
+            logger.info(f"Searching YouTube for: {search_query}")
+            
+            await self.page.goto(search_url, wait_until='networkidle', timeout=30000)
+            await asyncio.sleep(2)
+            
+            # Extract search results
+            results = await self.page.evaluate('''() => {
+                const items = [];
+                const videoElements = document.querySelectorAll('ytd-video-renderer, ytd-playlist-renderer');
+                
+                videoElements.forEach(el => {
+                    const titleEl = el.querySelector('#video-title, h3 a');
+                    const linkEl = el.querySelector('a#thumbnail, a#video-title');
+                    
+                    if (titleEl && linkEl) {
+                        const title = titleEl.textContent?.trim() || titleEl.getAttribute('title') || '';
+                        const href = linkEl.getAttribute('href') || '';
+                        
+                        if (title && href) {
+                            items.push({
+                                title: title,
+                                url: href.startsWith('http') ? href : 'https://www.youtube.com' + href,
+                                isPlaylist: href.includes('list=')
+                            });
+                        }
+                    }
+                });
+                
+                return items;
+            }''')
+            
+            if not results:
+                logger.warning(f"No YouTube results found for: {search_query}")
+                return {'found': False, 'match_score': 0}
+            
+            # Fuzzy match results
+            matches = []
+            search_term = f"{band_name} {album_name}".lower()
+            
+            for result in results:
+                title_lower = result['title'].lower()
+                
+                # Calculate similarity scores
+                full_score = fuzz.token_sort_ratio(search_term, title_lower)
+                album_score = fuzz.partial_ratio(album_name.lower(), title_lower)
+                band_score = fuzz.partial_ratio(band_name.lower(), title_lower)
+                
+                # Boost score if "full album" is in title
+                boost = 10 if 'full album' in title_lower else 0
+                
+                # Boost if both band and album are present
+                if band_score > 70 and album_score > 70:
+                    score = max(full_score, (album_score + band_score) // 2) + boost
+                else:
+                    score = max(full_score, album_score) + boost
+                
+                if score >= min_similarity:
+                    matches.append({
+                        'title': result['title'],
+                        'url': result['url'],
+                        'isPlaylist': result['isPlaylist'],
+                        'score': min(score, 100)  # Cap at 100
+                    })
+            
+            if not matches:
+                logger.warning(f"No matches above {min_similarity}% similarity")
+                return {'found': False, 'match_score': 0}
+            
+            # Sort by score and get best match
+            matches.sort(key=lambda x: x['score'], reverse=True)
+            best_match = matches[0]
+            
+            logger.info(f"Found match: {best_match['title']} (score: {best_match['score']})")
+            
+            # Extract ID and create embed URL
+            if best_match['isPlaylist']:
+                playlist_id = self._extract_youtube_playlist_id(best_match['url'])
+                if playlist_id:
+                    return {
+                        'found': True,
+                        'video_url': best_match['url'],
+                        'embed_url': f"https://www.youtube-nocookie.com/embed/videoseries?list={playlist_id}",
+                        'match_score': best_match['score'],
+                        'title': best_match['title'],
+                        'type': 'playlist'
+                    }
+            else:
+                video_id = self._extract_youtube_video_id(best_match['url'])
+                if video_id:
+                    return {
+                        'found': True,
+                        'video_url': best_match['url'],
+                        'embed_url': f"https://www.youtube-nocookie.com/embed/{video_id}",
+                        'match_score': best_match['score'],
+                        'title': best_match['title'],
+                        'type': 'video'
+                    }
+            
+            return {'found': False, 'match_score': 0}
+            
+        except Exception as e:
+            logger.error(f"Error searching YouTube: {e}")
+            return {'found': False, 'error': str(e), 'match_score': 0}
+    
     async def verify_youtube_album(
         self, 
         youtube_url: str, 
@@ -27,10 +161,14 @@ class PlatformVerifier:
         min_similarity: int = 75
     ) -> Dict[str, any]:
         """
-        Verify if album exists on band's YouTube channel.
+        Verify if album exists on YouTube.
+        Strategy:
+        1. If youtube_url is a direct video/playlist link, use it
+        2. If youtube_url is a channel, try searching the channel
+        3. If channel search fails or no URL provided, do global YouTube search
         
         Args:
-            youtube_url: Band's YouTube channel URL
+            youtube_url: Band's YouTube channel URL, video URL, or playlist URL (can be None)
             album_name: Album name to search for
             band_name: Band name for better matching
             min_similarity: Minimum fuzzy match score (0-100)
@@ -48,46 +186,112 @@ class PlatformVerifier:
         try:
             logger.info(f"Verifying YouTube album: {album_name} by {band_name}")
             
-            # Navigate to the channel
-            await self.page.goto(youtube_url, wait_until='networkidle', timeout=30000)
-            await asyncio.sleep(2)
-            
-            # Strategy 1: Check Videos tab
-            videos = await self._search_youtube_videos(album_name, band_name, min_similarity)
-            
-            if videos:
-                best_match = videos[0]
-                video_id = self._extract_youtube_video_id(best_match['url'])
-                
+            # Strategy 1: Check if URL is a direct video or playlist link
+            if youtube_url and ('/watch?v=' in youtube_url or '/embed/' in youtube_url):
+                # Direct video URL
+                video_id = self._extract_youtube_video_id(youtube_url)
                 if video_id:
-                    return {
-                        'found': True,
-                        'video_url': best_match['url'],
-                        'embed_url': f"https://www.youtube-nocookie.com/embed/{video_id}",
-                        'match_score': best_match['score'],
-                        'title': best_match['title'],
-                        'type': 'video'
-                    }
+                    logger.info(f"Direct video URL detected, using video ID: {video_id}")
+                    try:
+                        await self.page.goto(youtube_url, wait_until='networkidle', timeout=30000)
+                        await asyncio.sleep(2)
+                        title = await self.page.evaluate('() => document.querySelector("h1.ytd-video-primary-info-renderer, h1 yt-formatted-string")?.textContent?.trim() || ""')
+                        return {
+                            'found': True,
+                            'video_url': youtube_url,
+                            'embed_url': f"https://www.youtube-nocookie.com/embed/{video_id}",
+                            'match_score': 100,  # Direct link = perfect match
+                            'title': title or album_name,
+                            'type': 'video'
+                        }
+                    except Exception as e:
+                        logger.warning(f"Could not fetch video title: {e}")
+                        return {
+                            'found': True,
+                            'video_url': youtube_url,
+                            'embed_url': f"https://www.youtube-nocookie.com/embed/{video_id}",
+                            'match_score': 100,
+                            'title': album_name,
+                            'type': 'video'
+                        }
             
-            # Strategy 2: Check Playlists tab (for full albums)
-            playlists = await self._search_youtube_playlists(album_name, min_similarity)
-            
-            if playlists:
-                best_match = playlists[0]
-                playlist_id = self._extract_youtube_playlist_id(best_match['url'])
-                
+            elif youtube_url and '/playlist?list=' in youtube_url:
+                # Direct playlist URL
+                playlist_id = self._extract_youtube_playlist_id(youtube_url)
                 if playlist_id:
-                    return {
-                        'found': True,
-                        'video_url': best_match['url'],
-                        'embed_url': f"https://www.youtube-nocookie.com/embed/videoseries?list={playlist_id}",
-                        'match_score': best_match['score'],
-                        'title': best_match['title'],
-                        'type': 'playlist'
-                    }
+                    logger.info(f"Direct playlist URL detected, using playlist ID: {playlist_id}")
+                    try:
+                        await self.page.goto(youtube_url, wait_until='networkidle', timeout=30000)
+                        await asyncio.sleep(2)
+                        title = await self.page.evaluate('() => document.querySelector("h1.ytd-playlist-header-renderer, h1 yt-formatted-string")?.textContent?.trim() || ""')
+                        return {
+                            'found': True,
+                            'video_url': youtube_url,
+                            'embed_url': f"https://www.youtube-nocookie.com/embed/videoseries?list={playlist_id}",
+                            'match_score': 100,
+                            'title': title or album_name,
+                            'type': 'playlist'
+                        }
+                    except Exception as e:
+                        logger.warning(f"Could not fetch playlist title: {e}")
+                        return {
+                            'found': True,
+                            'video_url': youtube_url,
+                            'embed_url': f"https://www.youtube-nocookie.com/embed/videoseries?list={playlist_id}",
+                            'match_score': 100,
+                            'title': album_name,
+                            'type': 'playlist'
+                        }
             
-            logger.warning(f"Album not found on YouTube: {album_name}")
-            return {'found': False, 'match_score': 0}
+            # Strategy 2: Try channel search if URL is a channel
+            if youtube_url and ('/channel/' in youtube_url or '/@' in youtube_url or '/user/' in youtube_url):
+                logger.info(f"Channel URL detected, searching channel: {youtube_url}")
+                try:
+                    # Navigate to the channel
+                    await self.page.goto(youtube_url, wait_until='networkidle', timeout=30000)
+                    await asyncio.sleep(2)
+                    
+                    # Check Videos tab
+                    videos = await self._search_youtube_videos(album_name, band_name, min_similarity)
+                    
+                    if videos:
+                        best_match = videos[0]
+                        video_id = self._extract_youtube_video_id(best_match['url'])
+                        
+                        if video_id:
+                            return {
+                                'found': True,
+                                'video_url': best_match['url'],
+                                'embed_url': f"https://www.youtube-nocookie.com/embed/{video_id}",
+                                'match_score': best_match['score'],
+                                'title': best_match['title'],
+                                'type': 'video'
+                            }
+                    
+                    # Check Playlists tab (for full albums)
+                    playlists = await self._search_youtube_playlists(album_name, min_similarity)
+                    
+                    if playlists:
+                        best_match = playlists[0]
+                        playlist_id = self._extract_youtube_playlist_id(best_match['url'])
+                        
+                        if playlist_id:
+                            return {
+                                'found': True,
+                                'video_url': best_match['url'],
+                                'embed_url': f"https://www.youtube-nocookie.com/embed/videoseries?list={playlist_id}",
+                                'match_score': best_match['score'],
+                                'title': best_match['title'],
+                                'type': 'playlist'
+                            }
+                    
+                    logger.info(f"No matches found in channel, will try global search")
+                except Exception as e:
+                    logger.warning(f"Channel search failed: {e}, will try global search")
+            
+            # Strategy 3: Global YouTube search (fallback or if no channel URL)
+            logger.info(f"Attempting global YouTube search for: {band_name} - {album_name}")
+            return await self.search_youtube_directly(album_name, band_name, min_similarity)
             
         except Exception as e:
             logger.error(f"Error verifying YouTube album: {e}")

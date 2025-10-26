@@ -86,14 +86,40 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     fetchTracks();
   }, [bandcampUrl]);
 
+  const handleNext = () => {
+    if (currentTrackIndex < tracks.length - 1) {
+      setCurrentTrackIndex(currentTrackIndex + 1);
+    } else {
+      setCurrentTrackIndex(0); // Loop back to start
+    }
+  };
+
   // Audio event handlers
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const handleDurationChange = () => setDuration(audio.duration);
-    const handleEnded = () => handleNext();
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+    };
+    const handleDurationChange = () => {
+      const newDuration = audio.duration;
+      if (!isNaN(newDuration) && isFinite(newDuration)) {
+        console.log('Duration loaded:', newDuration);
+        setDuration(newDuration);
+      }
+    };
+    const handleLoadedMetadata = () => {
+      const newDuration = audio.duration;
+      if (!isNaN(newDuration) && isFinite(newDuration)) {
+        console.log('Metadata loaded, duration:', newDuration);
+        setDuration(newDuration);
+      }
+    };
+    const handleEnded = () => {
+      console.log('Track ended, moving to next');
+      handleNext();
+    };
     const handlePlay = () => {
       console.log('Audio play event fired');
       setIsPlaying(true);
@@ -105,6 +131,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
@@ -112,11 +139,12 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
     };
-  }, []);
+  }, [currentTrackIndex, tracks.length]);
 
   // Load track when index changes
   useEffect(() => {
@@ -124,10 +152,13 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
       const track = tracks[currentTrackIndex];
       if (track && track.file_mp3) {
         audioRef.current.src = track.file_mp3;
+        audioRef.current.load(); // Ensure metadata is loaded
+        
         // Auto-play when track changes
         audioRef.current.play()
           .then(() => {
-            // Successfully started playing - state will be set by 'play' event
+            console.log('Auto-play started successfully');
+            setIsPlaying(true); // Explicitly set state immediately
           })
           .catch(err => {
             console.error('Playback error:', err);
@@ -151,14 +182,6 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
         console.error('Playback error:', err);
         setIsPlaying(false);
       }
-    }
-  };
-
-  const handleNext = () => {
-    if (currentTrackIndex < tracks.length - 1) {
-      setCurrentTrackIndex(currentTrackIndex + 1);
-    } else {
-      setCurrentTrackIndex(0); // Loop back to start
     }
   };
 

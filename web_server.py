@@ -773,9 +773,13 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             verifier = BatchVerifier(db, headless=True)
             await verifier.initialize()
             
+            # Convert date format from DD-MM-YYYY to YYYY-MM-DD for database query
+            date_obj_for_verify = datetime.strptime(scrape_date, "%d-%m-%Y")
+            db_date_format = date_obj_for_verify.strftime("%Y-%m-%d")
+            
             verification_stats = await verifier.verify_date_range(
-                scrape_date,
-                scrape_date,
+                db_date_format,
+                db_date_format,
                 min_similarity=75
             )
             
@@ -906,6 +910,13 @@ async def get_scrape_status(token: str = Depends(verify_admin_token)):
     else:
         status_with_lock["user_friendly_status"] = "Ready to start scraping"
     
+    return status_with_lock
+
+@app.post("/api/admin/scrape/stop")
+async def stop_scraping(token: str = Depends(verify_admin_token)):
+    """Stop the currently running scraping process"""
+    if not scraping_status.get("is_running"):
+        raise HTTPException(status_code=400, detail="No scraping process is currently running")
     
     scraping_status["should_stop"] = True
     scraping_status["status_message"] = "Stopping scraping process..."
