@@ -219,6 +219,7 @@ covers/
 notes
 *.json
 !package*.json
+youtube_cache/
 
 # Frontend React app
 frontend/node_modules/

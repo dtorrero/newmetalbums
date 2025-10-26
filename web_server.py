@@ -923,6 +923,254 @@ async def stop_scraping(token: str = Depends(verify_admin_token)):
     
     return {"message": "Stop signal sent to scraping process"}
 
+@app.get("/api/youtube/audio/{video_id}")
+async def get_youtube_audio(video_id: str):
+    """
+    Download and cache YouTube audio, then serve it.
+    Uses yt-dlp to download audio to a cache directory.
+    """
+    import os
+    import hashlib
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    
+    logger.info(f"🎬 [YOUTUBE/CACHE] Request for video: {video_id}")
+    
+    # Create cache directory
+    cache_dir = Path("youtube_cache")
+    cache_dir.mkdir(exist_ok=True)
+    
+    # Use video ID as filename (safe for filesystem)
+    cache_file = cache_dir / f"{video_id}.webm"
+    
+    # Clean up any partial downloads from previous attempts
+    part_file = Path(str(cache_file) + '.part')
+    ytdl_file = Path(str(cache_file) + '.ytdl')
+    if part_file.exists():
+        logger.info(f"🎬 [YOUTUBE/CACHE] Cleaning up partial download: {part_file.name}")
+        part_file.unlink()
+    if ytdl_file.exists():
+        ytdl_file.unlink()
+    
+    # Check if already cached (try all possible extensions)
+    for ext in ['.mp4', '.webm', '.m4a', '.opus', '.ogg']:
+        cached_file = cache_file.with_suffix(ext)
+        if cached_file.exists():
+            file_size_mb = cached_file.stat().st_size / 1024 / 1024
+            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Serving from cache: {cached_file.name} ({file_size_mb:.2f} MB)")
+            
+            # Determine media type
+            media_type = "audio/webm"
+            if ext == '.mp4' or ext == '.m4a':
+                media_type = "audio/mp4"
+            elif ext == '.opus':
+                media_type = "audio/opus"
+            elif ext == '.ogg':
+                media_type = "audio/ogg"
+            
+            return FileResponse(
+                cached_file,
+                media_type=media_type,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
+                }
+            )
+    
+    # Download using yt-dlp
+    try:
+        import yt_dlp
+        
+        logger.info(f"🎬 [YOUTUBE/CACHE] Downloading audio for: {video_id}")
+        
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        ydl_opts = {
+            # Prefer smaller audio formats: opus (best compression), m4a, then fallback
+            'format': 'bestaudio[ext=opus]/bestaudio[ext=m4a]/bestaudio[ext=webm]/ba/b',
+            'outtmpl': str(cache_file.with_suffix('.%(ext)s')),  # Let yt-dlp add the extension
+            'quiet': False,
+            'no_warnings': False,
+            'logger': logger,
+            # Use actual player JS version to avoid signature extraction issues
+            'extractor_args': {
+                'youtube': {
+                    'player_js_version': ['actual'],  # Must be a list
+                }
+            },
+            'nocheckcertificate': True,
+            'geo_bypass': True,
+            # Prefer smaller file sizes
+            'prefer_free_formats': True,
+            'postprocessors': [],  # No post-processing
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=True)
+            
+            if not info:
+                raise HTTPException(status_code=404, detail="Could not download video")
+            
+            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Downloaded successfully")
+            
+            # Find the downloaded file (yt-dlp might add extension) and log size
+            if not cache_file.exists():
+                # Try common extensions
+                for ext in ['.webm', '.m4a', '.mp4', '.opus', '.ogg']:
+                    alt_file = cache_file.with_suffix(ext)
+                    if alt_file.exists():
+                        cache_file = alt_file
+                        logger.info(f"🎬 [YOUTUBE/CACHE] Found file with extension: {ext}")
+                        break
+            
+            if not cache_file.exists():
+                logger.error(f"🎬 [YOUTUBE/CACHE] File not found after download")
+                raise HTTPException(status_code=500, detail="Download succeeded but file not found")
+            
+            # Determine media type based on extension
+            media_type = "audio/webm"
+            if cache_file.suffix == '.mp4':
+                media_type = "audio/mp4"
+            elif cache_file.suffix == '.m4a':
+                media_type = "audio/mp4"
+            elif cache_file.suffix == '.opus':
+                media_type = "audio/opus"
+            elif cache_file.suffix == '.ogg':
+                media_type = "audio/ogg"
+            
+            # Log file size
+            file_size_mb = cache_file.stat().st_size / 1024 / 1024
+            logger.info(f"🎬 [YOUTUBE/CACHE] Serving file: {cache_file.name} ({media_type}, {file_size_mb:.2f} MB)")
+            
+            return FileResponse(
+                cache_file,
+                media_type=media_type,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "public, max-age=31536000",
+                }
+            )
+            
+    except Exception as e:
+        logger.error(f"🎬 [YOUTUBE/CACHE] ❌ Error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/youtube/stream")
+async def get_youtube_stream(url: str):
+    """
+    Extract audio stream URL from YouTube video/playlist using yt-dlp.
+    Returns direct stream URLs for playback without embed restrictions.
+    """
+    try:
+        import yt_dlp
+        
+        logger.info(f"🎬 [YOUTUBE/YT-DLP] ========== START ==========")
+        logger.info(f"🎬 [YOUTUBE/YT-DLP] Received URL: {url}")
+        
+        # Check if this is a YouTube Mix/Radio playlist (RD prefix)
+        # These are auto-generated and can't be accessed directly
+        if 'list=RD' in url or 'list=RDMM' in url or 'list=RDAO' in url:
+            logger.warning(f"🎬 [YOUTUBE/YT-DLP] Detected YouTube Mix playlist (RD/RDMM/RDAO)")
+            
+            # Try to extract the video ID from the Mix playlist ID
+            # Format: RD{videoId} or RDMM{videoId}
+            import re
+            video_id_match = re.search(r'list=RD(?:MM|AO)?([a-zA-Z0-9_-]{11})', url)
+            
+            if video_id_match:
+                video_id = video_id_match.group(1)
+                fallback_url = f"https://www.youtube.com/watch?v={video_id}"
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Extracted video ID: {video_id}")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Falling back to single video: {fallback_url}")
+                url = fallback_url
+            else:
+                logger.error(f"🎬 [YOUTUBE/YT-DLP] Could not extract video ID from Mix playlist")
+                raise HTTPException(
+                    status_code=404, 
+                    detail="YouTube Mix playlists are not supported. Please use a regular playlist or video URL."
+                )
+        
+        # yt-dlp options for audio extraction
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': False,  # Show yt-dlp output for debugging
+            'no_warnings': False,
+            'extract_flat': False,  # Get full info for playlists
+            'ignoreerrors': True,   # Continue on errors
+            'logger': logger,  # Use our logger
+        }
+        
+        logger.info(f"🎬 [YOUTUBE/YT-DLP] Calling yt-dlp.extract_info()...")
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            logger.info(f"🎬 [YOUTUBE/YT-DLP] Extract complete. Info type: {type(info)}")
+            
+            if not info:
+                logger.error(f"🎬 [YOUTUBE/YT-DLP] yt-dlp returned None - video may be unavailable")
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Could not extract video information. The video may be private, deleted, or region-restricted."
+                )
+            
+            # Handle playlists
+            if 'entries' in info:
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Type: PLAYLIST with {len(info.get('entries', []))} entries")
+                tracks = []
+                for idx, entry in enumerate(info['entries']):
+                    if entry and 'url' in entry:
+                        logger.info(f"🎬 [YOUTUBE/YT-DLP]   Track {idx+1}: {entry.get('title', 'Unknown')}")
+                        tracks.append({
+                            'title': entry.get('title', 'Unknown'),
+                            'duration': entry.get('duration', 0),
+                            'stream_url': entry.get('url'),
+                            'thumbnail': entry.get('thumbnail'),
+                        })
+                
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] ✅ SUCCESS - Returning {len(tracks)} tracks")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] ========== END ==========")
+                return {
+                    'found': True,
+                    'type': 'playlist',
+                    'title': info.get('title', 'Unknown Playlist'),
+                    'tracks': tracks,
+                    'track_count': len(tracks)
+                }
+            
+            # Handle single video
+            else:
+                stream_url = info.get('url')
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Type: SINGLE VIDEO")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Title: {info.get('title', 'Unknown')}")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Duration: {info.get('duration', 0)}s")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Stream URL: {stream_url[:100] if stream_url else 'None'}...")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] ✅ SUCCESS")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] ========== END ==========")
+                return {
+                    'found': True,
+                    'type': 'video',
+                    'title': info.get('title', 'Unknown'),
+                    'duration': info.get('duration', 0),
+                    'stream_url': stream_url,
+                    'thumbnail': info.get('thumbnail'),
+                }
+        
+    except yt_dlp.utils.DownloadError as e:
+        logger.error(f"🎬 [YOUTUBE/YT-DLP] ❌ DownloadError for URL {url}")
+        logger.error(f"🎬 [YOUTUBE/YT-DLP] Error: {e}")
+        logger.error(f"🎬 [YOUTUBE/YT-DLP] ========== END (ERROR) ==========")
+        raise HTTPException(status_code=404, detail=f"Could not extract stream: {str(e)}")
+    except Exception as e:
+        logger.error(f"🎬 [YOUTUBE/YT-DLP] ❌ Unexpected error for URL {url}")
+        logger.error(f"🎬 [YOUTUBE/YT-DLP] Error: {e}")
+        import traceback
+        logger.error(f"🎬 [YOUTUBE/YT-DLP] Traceback:\n{traceback.format_exc()}")
+        logger.error(f"🎬 [YOUTUBE/YT-DLP] ========== END (ERROR) ==========")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/bandcamp/tracks")
 async def get_bandcamp_tracks(url: str):
     """

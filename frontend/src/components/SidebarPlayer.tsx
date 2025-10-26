@@ -27,6 +27,7 @@ import {
 import { PlaylistItem, PlayerState } from '../types/playlist';
 import PlatformLinks from './PlatformLinks';
 import { BandcampPlayer } from './BandcampPlayer';
+import { YouTubePlayer } from './YouTubePlayer';
 
 interface SidebarPlayerProps {
   open: boolean;
@@ -52,22 +53,40 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     repeat: 'none',
   });
 
+  // User's platform preference (stored in localStorage)
+  const [platformPreference, setPlatformPreference] = useState<'bandcamp' | 'youtube'>(() => {
+    const saved = localStorage.getItem('player_platform_preference');
+    return (saved as 'bandcamp' | 'youtube') || 'bandcamp'; // Default to Bandcamp
+  });
+
   const youtubeRef = useRef<HTMLIFrameElement>(null);
   const bandcampRef = useRef<HTMLIFrameElement>(null);
 
   const currentItem = playlist[playerState.currentIndex];
 
-  // Determine which platform to show
+  // Determine which platform to show based on user preference
   useEffect(() => {
     if (!currentItem) return;
 
-    // Priority: YouTube > Bandcamp
-    if (currentItem.platforms.youtube) {
-      setPlayerState(prev => ({ ...prev, currentPlatform: 'youtube', isPlaying: false }));
-    } else if (currentItem.platforms.bandcamp) {
-      setPlayerState(prev => ({ ...prev, currentPlatform: 'bandcamp', isPlaying: false }));
+    // Try user's preferred platform first, fallback to the other
+    let selectedPlatform: 'youtube' | 'bandcamp' | null = null;
+    
+    if (platformPreference === 'bandcamp') {
+      if (currentItem.platforms.bandcamp) {
+        selectedPlatform = 'bandcamp';
+      } else if (currentItem.platforms.youtube) {
+        selectedPlatform = 'youtube';
+      }
+    } else {
+      if (currentItem.platforms.youtube) {
+        selectedPlatform = 'youtube';
+      } else if (currentItem.platforms.bandcamp) {
+        selectedPlatform = 'bandcamp';
+      }
     }
-  }, [currentItem]);
+
+    setPlayerState(prev => ({ ...prev, currentPlatform: selectedPlatform, isPlaying: false }));
+  }, [currentItem, platformPreference]);
   
   // Auto-play YouTube when play button is clicked
   useEffect(() => {
@@ -119,6 +138,16 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
 
   const handleShuffle = () => {
     setPlayerState(prev => ({ ...prev, shuffle: !prev.shuffle }));
+  };
+
+  const handlePlatformChange = (platform: 'bandcamp' | 'youtube') => {
+    setPlatformPreference(platform);
+    localStorage.setItem('player_platform_preference', platform);
+    
+    // Switch platform if available
+    if (currentItem.platforms[platform]) {
+      setPlayerState(prev => ({ ...prev, currentPlatform: platform, isPlaying: false }));
+    }
   };
 
   if (!currentItem) {
@@ -216,21 +245,54 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
           </Box>
         </Box>
 
+        {/* Platform Selection */}
+        {currentItem.platforms.youtube && currentItem.platforms.bandcamp && (
+          <Box sx={{ px: 2, pt: 2 }}>
+            <Stack direction="row" spacing={1} justifyContent="center">
+              <Button
+                variant={platformPreference === 'bandcamp' ? 'contained' : 'outlined'}
+                size="small"
+                onClick={() => handlePlatformChange('bandcamp')}
+                disabled={!currentItem.platforms.bandcamp}
+              >
+                Bandcamp
+              </Button>
+              <Button
+                variant={platformPreference === 'youtube' ? 'contained' : 'outlined'}
+                size="small"
+                onClick={() => handlePlatformChange('youtube')}
+                disabled={!currentItem.platforms.youtube}
+              >
+                YouTube
+              </Button>
+            </Stack>
+          </Box>
+        )}
+
         {/* Embed Players */}
         <Box sx={{ px: 2, py: 2 }}>
           {currentItem.platforms.youtube && playerState.currentPlatform === 'youtube' && (
             <Box sx={{ width: '100%', mb: 2 }}>
-              <iframe
-                ref={youtubeRef}
-                width="100%"
-                height="200"
-                src={`${currentItem.platforms.youtube.embed_url}?enablejsapi=1&autoplay=${playerState.isPlaying ? 1 : 0}&rel=0&modestbranding=1`}
-                title="YouTube Player"
-                frameBorder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                style={{ borderRadius: '8px' }}
+              {/* Custom YouTube Player using yt-dlp - No embed restrictions! */}
+              <YouTubePlayer
+                youtubeUrl={currentItem.platforms.youtube.video_url || currentItem.platforms.youtube.embed_url}
+                albumTitle={currentItem.title}
+                artist={currentItem.artist}
               />
+              
+              {/* Fallback link */}
+              <Button
+                variant="text"
+                size="small"
+                fullWidth
+                startIcon={<OpenInNew />}
+                href={currentItem.platforms.youtube.video_url || currentItem.platforms.youtube.embed_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{ mt: 1, fontSize: '0.75rem' }}
+              >
+                Open in YouTube
+              </Button>
             </Box>
           )}
 

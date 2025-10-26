@@ -127,6 +127,28 @@ class PlatformVerifier:
             if best_match['isPlaylist']:
                 playlist_id = self._extract_youtube_playlist_id(best_match['url'])
                 if playlist_id:
+                    # Check if this is a YouTube Mix playlist (RD/RDMM/RDAO)
+                    # These are auto-generated and can't be played reliably
+                    if playlist_id.startswith('RD') or playlist_id.startswith('RDMM') or playlist_id.startswith('RDAO'):
+                        logger.warning(f"Skipping YouTube Mix playlist: {playlist_id}")
+                        # Try to extract video ID from the Mix playlist
+                        import re
+                        video_id_match = re.search(r'^RD(?:MM|AO)?([a-zA-Z0-9_-]{11})', playlist_id)
+                        if video_id_match:
+                            video_id = video_id_match.group(1)
+                            logger.info(f"Extracted video ID from Mix: {video_id}, using single video instead")
+                            return {
+                                'found': True,
+                                'video_url': f"https://www.youtube.com/watch?v={video_id}",
+                                'embed_url': f"https://www.youtube-nocookie.com/embed/{video_id}",
+                                'match_score': best_match['score'],
+                                'title': best_match['title'],
+                                'type': 'video'
+                            }
+                        else:
+                            # Can't extract video ID, skip this result
+                            return {'found': False, 'match_score': 0}
+                    
                     return {
                         'found': True,
                         'video_url': best_match['url'],

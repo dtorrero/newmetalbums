@@ -58,6 +58,7 @@ class AlbumsDatabase:
                 soundcloud_url TEXT,
                 tidal_url TEXT,
                 youtube_embed_url TEXT,
+                youtube_video_url TEXT,
                 youtube_verified_title TEXT,
                 youtube_verification_score INTEGER,
                 youtube_embed_type TEXT,
@@ -215,6 +216,7 @@ class AlbumsDatabase:
         # List of new columns to add
         new_columns = {
             'youtube_embed_url': 'TEXT',
+            'youtube_video_url': 'TEXT',
             'youtube_verified_title': 'TEXT',
             'youtube_verification_score': 'INTEGER',
             'youtube_embed_type': 'TEXT',
@@ -1156,12 +1158,14 @@ class AlbumsDatabase:
         if youtube_result and youtube_result.get('found'):
             updates.extend([
                 "youtube_embed_url = ?",
+                "youtube_video_url = ?",
                 "youtube_verified_title = ?",
                 "youtube_verification_score = ?",
                 "youtube_embed_type = ?"
             ])
             params.extend([
                 youtube_result.get('embed_url'),
+                youtube_result.get('video_url'),
                 youtube_result.get('title'),
                 youtube_result.get('match_score'),
                 youtube_result.get('type')
@@ -1212,7 +1216,7 @@ class AlbumsDatabase:
             SELECT 
                 album_id, album_name, band_name, type, release_date,
                 cover_art, cover_path, album_url,
-                youtube_embed_url, youtube_verified_title, youtube_verification_score, youtube_embed_type,
+                youtube_embed_url, youtube_video_url, youtube_verified_title, youtube_verification_score, youtube_embed_type,
                 bandcamp_embed_url, bandcamp_verified_title, bandcamp_verification_score,
                 playable_verified
             FROM albums

@@ -4,6 +4,7 @@
 
 export interface PlatformEmbed {
   embed_url: string;
+  video_url?: string; // Original video/playlist URL (for YouTube)
   verified_title?: string;
   verification_score?: number;
   embed_type?: string; // 'video' or 'playlist' for YouTube
