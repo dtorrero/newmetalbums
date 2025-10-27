@@ -10,6 +10,7 @@ import {
   CircularProgress,
   Alert,
   Chip,
+  Snackbar,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -49,6 +50,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [trackLoading, setTrackLoading] = useState(false);
+  const [downloadNotification, setDownloadNotification] = useState<string | null>(null);
   const internalHasUserInteractedRef = useRef(false);  // Local fallback
   // Use external ref if provided, otherwise use internal
   const hasUserInteractedRef = externalHasUserInteractedRef || internalHasUserInteractedRef;
@@ -250,10 +252,32 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
         setTrackLoading(true);
         const audio = audioRef.current;
         
+        // Check if this is a cached download URL (contains /api/youtube/audio/)
+        const isCachedDownload = track.stream_url.includes('/api/youtube/audio/');
+        
+        // If it's a cached download, check file size and show notification
+        if (isCachedDownload) {
+          const videoId = track.stream_url.split('/api/youtube/audio/')[1];
+          const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+          
+          // Get download info before loading audio
+          fetch(`${baseUrl}/api/youtube/audio/${videoId}/info`)
+            .then(response => response.json())
+            .then(data => {
+              if (!data.cached && data.size_mb > 20) {
+                setDownloadNotification(
+                  `Downloading large audio file (${data.size_mb}MB)... Estimated time: ${data.estimated_time}`
+                );
+              }
+            })
+            .catch(err => console.log('Could not check download size:', err));
+        }
+        
         // Simple approach: load and auto-play when ready (if user has interacted)
         const handleCanPlay = () => {
           console.log('🎬 [YOUTUBE] Track ready');
           setTrackLoading(false);
+          setDownloadNotification(null); // Clear notification when ready
           
           // Only auto-play if user has clicked play before (browser autoplay policy)
           if (hasUserInteractedRef.current) {
@@ -480,6 +504,20 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
           </List>
         </Box>
       )}
+      
+      {/* Download Notification Snackbar */}
+      <Snackbar
+        open={!!downloadNotification}
+        message={downloadNotification}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        ContentProps={{
+          sx: {
+            bgcolor: 'info.main',
+            color: 'white',
+            fontWeight: 'bold',
+          }
+        }}
+      />
     </Box>
   );
 };

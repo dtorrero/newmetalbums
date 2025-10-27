@@ -1038,15 +1038,27 @@ async def get_youtube_audio(video_id: str):
             # Run info extraction in thread pool to avoid blocking
             info_only = await asyncio.to_thread(get_info)
             
+            # Store file size info for potential notification
+            filesize_mb = 0
+            estimated_time = "unknown"
+            
             if info_only:
                 # Get estimated file size
                 filesize = info_only.get('filesize') or info_only.get('filesize_approx', 0)
                 filesize_mb = filesize / 1024 / 1024 if filesize else 0
                 
+                # Estimate download time (assuming ~2 MB/s average download speed)
+                if filesize_mb > 0:
+                    estimated_seconds = filesize_mb / 2.0
+                    if estimated_seconds < 60:
+                        estimated_time = f"{int(estimated_seconds)}s"
+                    else:
+                        estimated_time = f"{int(estimated_seconds / 60)}m {int(estimated_seconds % 60)}s"
+                
                 if filesize_mb > 50:
                     logger.warning(f"🎬 [YOUTUBE/CACHE] ⚠️ Large file detected: {filesize_mb:.1f} MB")
                 
-                logger.info(f"🎬 [YOUTUBE/CACHE] Estimated size: {filesize_mb:.1f} MB")
+                logger.info(f"🎬 [YOUTUBE/CACHE] Estimated size: {filesize_mb:.1f} MB, time: {estimated_time}")
             
             # Now download
             def download_audio():
@@ -1142,6 +1154,65 @@ async def get_youtube_audio(video_id: str):
             import traceback
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Failed to download YouTube audio. The video may be unavailable or restricted. Error: {str(e)}")
+
+@app.get("/api/youtube/audio/{video_id}/info")
+async def get_youtube_audio_info(video_id: str):
+    """
+    Get information about a YouTube audio file (size, download status).
+    Used by frontend to show download notifications.
+    """
+    import yt_dlp
+    
+    # Check if already cached
+    cached_file = youtube_cache.get_cached_file(video_id)
+    if cached_file:
+        file_size_mb = cached_file.stat().st_size / 1024 / 1024
+        return {
+            "cached": True,
+            "size_mb": round(file_size_mb, 1),
+            "estimated_time": "0s"
+        }
+    
+    # Not cached - get file size estimate
+    try:
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        def get_info():
+            ydl_opts_info = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                return ydl.extract_info(video_url, download=False)
+        
+        info_only = await asyncio.to_thread(get_info)
+        
+        if info_only:
+            filesize = info_only.get('filesize') or info_only.get('filesize_approx', 0)
+            filesize_mb = filesize / 1024 / 1024 if filesize else 0
+            
+            # Estimate download time (assuming ~2 MB/s average download speed)
+            estimated_time = "unknown"
+            if filesize_mb > 0:
+                estimated_seconds = filesize_mb / 2.0
+                if estimated_seconds < 60:
+                    estimated_time = f"{int(estimated_seconds)}s"
+                else:
+                    estimated_time = f"{int(estimated_seconds / 60)}m {int(estimated_seconds % 60)}s"
+            
+            return {
+                "cached": False,
+                "size_mb": round(filesize_mb, 1),
+                "estimated_time": estimated_time
+            }
+    except Exception as e:
+        logger.error(f"Error getting audio info: {e}")
+        return {
+            "cached": False,
+            "size_mb": 0,
+            "estimated_time": "unknown"
+        }
 
 @app.get("/api/youtube/stream")
 async def get_youtube_stream(url: str):
