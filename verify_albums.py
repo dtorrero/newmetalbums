@@ -192,6 +192,9 @@ async def main():
         print(f"    - Bandcamp: {stats['bandcamp_count']}")
         print(f"  ✗ Failed: {stats['failed']}")
         
+        if stats.get('errors', 0) > 0:
+            print(f"  ⚠️  Connection errors: {stats['errors']}")
+        
         if stats['verified'] > 0:
             success_rate = (stats['verified'] / stats['total'] * 100) if stats['total'] > 0 else 0
             print(f"  📊 Success rate: {success_rate:.1f}%")

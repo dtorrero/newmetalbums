@@ -29,22 +29,46 @@ class BatchVerifier:
         self.verifier = PlatformVerifier(self.scraper.page)
         logger.info("Batch verifier initialized")
     
+    async def restart_browser(self):
+        """Restart the browser connection after an error."""
+        logger.info("Restarting browser...")
+        try:
+            if self.scraper:
+                await self.scraper.close()
+        except Exception as e:
+            logger.warning(f"Error closing old browser: {e}")
+        
+        # Reinitialize
+        self.scraper = MetalArchivesScraper(headless=self.headless)
+        await self.scraper.initialize()
+        self.verifier = PlatformVerifier(self.scraper.page)
+        logger.info("Browser restarted successfully")
+    
     async def close(self):
         """Close scraper."""
         if self.scraper:
-            await self.scraper.close()
-            logger.info("Batch verifier closed")
+            try:
+                await self.scraper.close()
+                logger.info("Batch verifier closed")
+            except Exception as e:
+                logger.warning(f"Error closing batch verifier: {e}")
     
-    async def verify_album(self, album: Dict, min_similarity: int = 75) -> Dict:
+    async def verify_album(self, album: Dict, min_similarity: int = 75, max_retries: int = 2) -> Dict:
         """
-        Verify a single album's playable URLs.
+        Verify a single album's playable URLs with retry logic.
+        
+        Args:
+            album: Album dictionary with metadata
+            min_similarity: Minimum fuzzy match score
+            max_retries: Number of retries on connection errors
         
         Returns:
             {
                 'album_id': str,
                 'youtube': {...} or None,
                 'bandcamp': {...} or None,
-                'success': bool
+                'success': bool,
+                'error': str or None
             }
         """
         album_id = album['album_id']
@@ -57,60 +81,91 @@ class BatchVerifier:
             'album_id': album_id,
             'youtube': None,
             'bandcamp': None,
-            'success': False
+            'success': False,
+            'error': None
         }
         
-        try:
-            # Verify YouTube
-            youtube_url = album.get('youtube_url')
-            if youtube_url and youtube_url != 'N/A' and youtube_url.strip():
-                try:
-                    youtube_result = await self.verifier.verify_youtube_album(
-                        youtube_url=youtube_url,
-                        album_name=album_name,
-                        band_name=band_name,
-                        min_similarity=min_similarity
+        for attempt in range(max_retries + 1):
+            try:
+                # Verify YouTube
+                youtube_url = album.get('youtube_url')
+                if youtube_url and youtube_url != 'N/A' and youtube_url.strip():
+                    try:
+                        youtube_result = await self.verifier.verify_youtube_album(
+                            youtube_url=youtube_url,
+                            album_name=album_name,
+                            band_name=band_name,
+                            min_similarity=min_similarity
+                        )
+                        if youtube_result.get('found'):
+                            result['youtube'] = youtube_result
+                            logger.info(f"  ✓ YouTube verified (score: {youtube_result['match_score']})")
+                        else:
+                            logger.warning(f"  ✗ YouTube not found")
+                    except Exception as e:
+                        error_msg = str(e)
+                        if 'Target page, context or browser has been closed' in error_msg or 'Connection closed' in error_msg:
+                            raise  # Re-raise connection errors to trigger retry
+                        logger.error(f"  ✗ YouTube verification error: {e}")
+                
+                # Verify Bandcamp
+                bandcamp_url = album.get('bandcamp_url')
+                if bandcamp_url and bandcamp_url != 'N/A' and bandcamp_url.strip():
+                    try:
+                        bandcamp_result = await self.verifier.verify_bandcamp_album(
+                            bandcamp_url=bandcamp_url,
+                            album_name=album_name,
+                            album_type=album.get('type', 'album'),
+                            min_similarity=min_similarity
+                        )
+                        if bandcamp_result.get('found'):
+                            result['bandcamp'] = bandcamp_result
+                            logger.info(f"  ✓ Bandcamp verified (score: {bandcamp_result['match_score']})")
+                        else:
+                            logger.warning(f"  ✗ Bandcamp not found")
+                    except Exception as e:
+                        error_msg = str(e)
+                        if 'Target page, context or browser has been closed' in error_msg or 'Connection closed' in error_msg:
+                            raise  # Re-raise connection errors to trigger retry
+                        logger.error(f"  ✗ Bandcamp verification error: {e}")
+                
+                # Mark as success if at least one platform verified
+                result['success'] = result['youtube'] is not None or result['bandcamp'] is not None
+                
+                # Update database
+                if result['success']:
+                    self.db.update_album_playable_urls(
+                        album_id=album_id,
+                        youtube_result=result['youtube'],
+                        bandcamp_result=result['bandcamp']
                     )
-                    if youtube_result.get('found'):
-                        result['youtube'] = youtube_result
-                        logger.info(f"  ✓ YouTube verified (score: {youtube_result['match_score']})")
-                    else:
-                        logger.warning(f"  ✗ YouTube not found")
-                except Exception as e:
-                    logger.error(f"  ✗ YouTube verification error: {e}")
-            
-            # Verify Bandcamp
-            bandcamp_url = album.get('bandcamp_url')
-            if bandcamp_url and bandcamp_url != 'N/A' and bandcamp_url.strip():
-                try:
-                    bandcamp_result = await self.verifier.verify_bandcamp_album(
-                        bandcamp_url=bandcamp_url,
-                        album_name=album_name,
-                        album_type=album.get('type', 'album'),
-                        min_similarity=min_similarity
-                    )
-                    if bandcamp_result.get('found'):
-                        result['bandcamp'] = bandcamp_result
-                        logger.info(f"  ✓ Bandcamp verified (score: {bandcamp_result['match_score']})")
-                    else:
-                        logger.warning(f"  ✗ Bandcamp not found")
-                except Exception as e:
-                    logger.error(f"  ✗ Bandcamp verification error: {e}")
-            
-            # Mark as success if at least one platform verified
-            result['success'] = result['youtube'] is not None or result['bandcamp'] is not None
-            
-            # Update database
-            if result['success']:
-                self.db.update_album_playable_urls(
-                    album_id=album_id,
-                    youtube_result=result['youtube'],
-                    bandcamp_result=result['bandcamp']
+                    logger.info(f"  ✓ Database updated")
+                
+                # Success - break retry loop
+                break
+                
+            except Exception as e:
+                error_msg = str(e)
+                is_connection_error = (
+                    'Target page, context or browser has been closed' in error_msg or
+                    'Connection closed' in error_msg or
+                    'AttributeError' in str(type(e)) or
+                    '_object' in error_msg
                 )
-                logger.info(f"  ✓ Database updated")
-            
-        except Exception as e:
-            logger.error(f"Error verifying album {album_id}: {e}")
+                
+                if is_connection_error and attempt < max_retries:
+                    logger.warning(f"  ⚠️  Connection error (attempt {attempt + 1}/{max_retries + 1}), restarting browser...")
+                    try:
+                        await self.restart_browser()
+                        await asyncio.sleep(2)
+                    except Exception as restart_error:
+                        logger.error(f"  ✗ Browser restart failed: {restart_error}")
+                        result['error'] = f"Browser restart failed: {restart_error}"
+                        break
+                else:
+                    logger.error(f"Error verifying album {album_id}: {e}")
+                    result['error'] = str(e)
+                    break
         
         return result
     
@@ -118,7 +173,8 @@ class BatchVerifier:
         self,
         albums: List[Dict],
         min_similarity: int = 75,
-        delay_between: float = 2.0
+        delay_between: float = 2.0,
+        restart_every: int = 50
     ) -> Dict:
         """
         Verify multiple albums with delay between requests.
@@ -127,6 +183,7 @@ class BatchVerifier:
             albums: List of album dictionaries
             min_similarity: Minimum fuzzy match score
             delay_between: Seconds to wait between albums
+            restart_every: Restart browser every N albums to prevent connection issues
         
         Returns:
             {
@@ -135,6 +192,7 @@ class BatchVerifier:
                 'youtube_count': int,
                 'bandcamp_count': int,
                 'failed': int,
+                'errors': int,
                 'results': List[Dict]
             }
         """
@@ -144,11 +202,21 @@ class BatchVerifier:
             'youtube_count': 0,
             'bandcamp_count': 0,
             'failed': 0,
+            'errors': 0,
             'results': []
         }
         
         for i, album in enumerate(albums, 1):
             logger.info(f"[{i}/{len(albums)}] Processing album...")
+            
+            # Preventive browser restart every N albums
+            if i > 1 and i % restart_every == 0:
+                logger.info(f"Preventive browser restart after {restart_every} albums...")
+                try:
+                    await self.restart_browser()
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    logger.error(f"Preventive restart failed: {e}")
             
             result = await self.verify_album(album, min_similarity)
             stats['results'].append(result)
@@ -161,12 +229,18 @@ class BatchVerifier:
                     stats['bandcamp_count'] += 1
             else:
                 stats['failed'] += 1
+                if result.get('error'):
+                    stats['errors'] += 1
+            
+            # Show progress
+            if i % 10 == 0 or i == len(albums):
+                logger.info(f"Progress: {i}/{len(albums)} albums processed, {stats['verified']} verified")
             
             # Delay between requests to avoid rate limiting
             if i < len(albums):
                 await asyncio.sleep(delay_between)
         
-        logger.info(f"Batch verification complete: {stats['verified']}/{stats['total']} verified")
+        logger.info(f"Batch verification complete: {stats['verified']}/{stats['total']} verified, {stats['errors']} errors")
         return stats
     
     async def verify_date_range(
