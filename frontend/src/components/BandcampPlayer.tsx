@@ -31,12 +31,14 @@ interface BandcampPlayerProps {
   bandcampUrl: string;
   albumTitle?: string;
   artist?: string;
+  onAlbumEnd?: () => void;
 }
 
 export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
   bandcampUrl,
   albumTitle,
   artist,
+  onAlbumEnd,
 }) => {
   const [tracks, setTracks] = useState<BandcampTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,8 +47,10 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [trackLoading, setTrackLoading] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement>(null);
+  const hasUserStartedPlaybackRef = useRef(false);
 
   // Fetch tracks from backend
   useEffect(() => {
@@ -58,7 +62,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
         setIsPlaying(false);  // Reset play state
         setCurrentTime(0);
         setDuration(0);
-        
+        // Don't reset hasUserStartedPlaybackRef - preserve across albums
         const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
         const response = await fetch(
           `${baseUrl}/api/bandcamp/tracks?url=${encodeURIComponent(bandcampUrl)}`
@@ -90,7 +94,12 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     if (currentTrackIndex < tracks.length - 1) {
       setCurrentTrackIndex(currentTrackIndex + 1);
     } else {
-      setCurrentTrackIndex(0); // Loop back to start
+      // Last track finished - notify parent to go to next album
+      if (onAlbumEnd) {
+        onAlbumEnd();
+      } else {
+        setCurrentTrackIndex(0); // Fallback: loop back to start
+      }
     }
   };
 
@@ -128,6 +137,13 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
       console.log('Audio pause event fired');
       setIsPlaying(false);
     };
+    const handleCanPlayThrough = () => {
+      setTrackLoading(false);  // Track is ready
+      console.log('Track ready to play');
+    };
+    const handleWaiting = () => {
+      setTrackLoading(true);  // Buffering
+    };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
@@ -135,6 +151,8 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
+    audio.addEventListener('canplaythrough', handleCanPlayThrough);
+    audio.addEventListener('waiting', handleWaiting);
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
@@ -143,6 +161,8 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('canplaythrough', handleCanPlayThrough);
+      audio.removeEventListener('waiting', handleWaiting);
     };
   }, [currentTrackIndex, tracks.length]);
 
@@ -151,19 +171,23 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     if (tracks.length > 0 && audioRef.current) {
       const track = tracks[currentTrackIndex];
       if (track && track.file_mp3) {
+        setTrackLoading(true);  // Start loading
         audioRef.current.src = track.file_mp3;
         audioRef.current.load(); // Ensure metadata is loaded
         
-        // Auto-play when track changes
-        audioRef.current.play()
-          .then(() => {
-            console.log('Auto-play started successfully');
-            setIsPlaying(true); // Explicitly set state immediately
-          })
-          .catch(err => {
-            console.error('Playback error:', err);
-            setIsPlaying(false);
-          });
+        // Auto-play if user has already started playback (e.g., album transitions)
+        // Only skip auto-play on the very first album when player opens
+        if (hasUserStartedPlaybackRef.current) {
+          audioRef.current.play()
+            .then(() => {
+              console.log('Auto-play started (user has started playback)');
+            })
+            .catch(err => {
+              console.error('Playback error:', err);
+            });
+        } else {
+          console.log('First album load - waiting for user to click play');
+        }
       }
     }
   }, [currentTrackIndex, tracks]);
@@ -177,6 +201,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     } else {
       try {
         await audioRef.current.play();
+        hasUserStartedPlaybackRef.current = true;  // Mark that user has started playback
         setIsPlaying(true);
       } catch (err) {
         console.error('Playback error:', err);
@@ -309,15 +334,17 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
         
         <IconButton
           onClick={handlePlayPause}
+          disabled={trackLoading}
           sx={{
             bgcolor: 'primary.main',
             color: 'white',
             '&:hover': { bgcolor: 'primary.dark' },
+            '&.Mui-disabled': { bgcolor: '#666', color: '#999' },
             width: 56,
             height: 56,
           }}
         >
-          {isPlaying ? <Pause /> : <PlayArrow />}
+          {trackLoading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : (isPlaying ? <Pause /> : <PlayArrow />)}
         </IconButton>
         
         <IconButton onClick={handleNext} disabled={tracks.length <= 1}>

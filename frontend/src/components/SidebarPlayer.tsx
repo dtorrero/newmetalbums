@@ -128,6 +128,12 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     setPlayerState(prev => ({ ...prev, currentIndex: nextIndex }));
   };
 
+  const handleAlbumEnd = () => {
+    // Called when the last track of an album finishes
+    console.log('Album finished, advancing to next album');
+    handleNext();
+  };
+
   const handlePrevious = () => {
     let prevIndex = playerState.currentIndex - 1;
     if (prevIndex < 0) {
@@ -278,6 +284,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                 youtubeUrl={currentItem.platforms.youtube.video_url || currentItem.platforms.youtube.embed_url}
                 albumTitle={currentItem.title}
                 artist={currentItem.artist}
+                onAlbumEnd={handleAlbumEnd}
               />
               
               {/* Fallback link */}
@@ -303,6 +310,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                 bandcampUrl={currentItem.platforms.bandcamp.embed_url}
                 albumTitle={currentItem.title}
                 artist={currentItem.artist}
+                onAlbumEnd={handleAlbumEnd}
               />
               
               {/* Fallback link */}
