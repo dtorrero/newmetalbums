@@ -19,8 +19,10 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Tabs,
+  Tab,
 } from '@mui/material';
-import { Save, Refresh, ArrowBack, Storage, Delete, Info } from '@mui/icons-material';
+import { Save, Refresh, ArrowBack, Storage, Delete, Info, Link as LinkIcon, Tune } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { authFetch } from '../utils/auth';
 
@@ -50,6 +52,11 @@ interface CacheSettings {
   youtube_cache_max_size_gb: number;
 }
 
+interface PlayerSettings {
+  bandcamp_enabled: boolean;
+  youtube_enabled: boolean;
+}
+
 const PLATFORM_ICONS: { [key: string]: string } = {
   bandcamp: '🎵',
   youtube: '▶️',
@@ -73,6 +80,17 @@ const Settings: React.FC = () => {
   const [cacheSettings, setCacheSettings] = useState<CacheSettings>({ youtube_cache_max_size_gb: 5.0 });
   const [originalCacheSettings, setOriginalCacheSettings] = useState<CacheSettings>({ youtube_cache_max_size_gb: 5.0 });
   const [clearCacheDialog, setClearCacheDialog] = useState(false);
+  const [currentTab, setCurrentTab] = useState(0);
+  
+  // Player settings state
+  const [playerSettings, setPlayerSettings] = useState<PlayerSettings>({
+    bandcamp_enabled: true,
+    youtube_enabled: true,
+  });
+  const [originalPlayerSettings, setOriginalPlayerSettings] = useState<PlayerSettings>({
+    bandcamp_enabled: true,
+    youtube_enabled: true,
+  });
 
   // Get API base URL - in production, nginx proxies everything, so use relative URLs
   const getApiBase = () => {
@@ -88,6 +106,7 @@ const Settings: React.FC = () => {
     loadSettings();
     loadCacheSettings();
     loadCacheStats();
+    loadPlayerSettings();
     
     // Refresh cache stats every 30 seconds
     const interval = setInterval(loadCacheStats, 30000);
@@ -253,6 +272,58 @@ const Settings: React.FC = () => {
   };
 
   const hasCacheChanges = cacheSettings.youtube_cache_max_size_gb !== originalCacheSettings.youtube_cache_max_size_gb;
+  
+  const hasPlayerChanges = 
+    playerSettings.bandcamp_enabled !== originalPlayerSettings.bandcamp_enabled ||
+    playerSettings.youtube_enabled !== originalPlayerSettings.youtube_enabled;
+
+  const loadPlayerSettings = async () => {
+    try {
+      const response = await authFetch(`${API_BASE}/api/admin/settings/player`);
+      if (response.ok) {
+        const data = await response.json();
+        setPlayerSettings(data);
+        setOriginalPlayerSettings(data);
+      }
+    } catch (error) {
+      console.error('Error fetching player settings:', error);
+    }
+  };
+
+  const handleSavePlayerSettings = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+      
+      const response = await authFetch(`${API_BASE}/api/admin/settings/player`, {
+        method: 'PUT',
+        body: JSON.stringify(playerSettings),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to save player settings');
+      }
+      
+      setOriginalPlayerSettings(playerSettings);
+      setSuccess('Player settings saved successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save player settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePlayerToggle = (service: 'bandcamp' | 'youtube') => {
+    setPlayerSettings(prev => ({
+      ...prev,
+      [`${service}_enabled`]: !prev[`${service}_enabled`]
+    }));
+    setSuccess(null);
+  };
 
   if (loading) {
     return (
@@ -274,15 +345,20 @@ const Settings: React.FC = () => {
             Back to Admin
           </Button>
           <Typography variant="h4" component="h1">
-            Platform Link Settings
+            Settings
           </Typography>
         </Box>
         <Button
           startIcon={<Refresh />}
-          onClick={loadSettings}
+          onClick={() => {
+            loadSettings();
+            loadCacheSettings();
+            loadCacheStats();
+            loadPlayerSettings();
+          }}
           disabled={saving}
         >
-          Reload
+          Reload All
         </Button>
       </Box>
 
@@ -298,6 +374,17 @@ const Settings: React.FC = () => {
         </Alert>
       )}
 
+      {/* Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs value={currentTab} onChange={(e, newValue) => setCurrentTab(newValue)}>
+          <Tab icon={<LinkIcon />} label="Platform Links" iconPosition="start" />
+          <Tab icon={<Storage />} label="Cache" iconPosition="start" />
+          <Tab icon={<Tune />} label="Miscellaneous" iconPosition="start" />
+        </Tabs>
+      </Box>
+
+      {/* Tab 0: Platform Links */}
+      {currentTab === 0 && (
       <Card>
         <CardContent>
           <Typography variant="h6" gutterBottom>
@@ -358,9 +445,11 @@ const Settings: React.FC = () => {
           </Box>
         </CardContent>
       </Card>
+      )}
 
-      {/* YouTube Cache Settings */}
-      <Card sx={{ mt: 3 }}>
+      {/* Tab 1: YouTube Cache Settings */}
+      {currentTab === 1 && (
+      <Card>
         <CardContent>
           <Box display="flex" alignItems="center" mb={2}>
             <Storage sx={{ mr: 1, color: 'primary.main' }} />
@@ -452,13 +541,101 @@ const Settings: React.FC = () => {
           </Box>
         </CardContent>
       </Card>
+      )}
 
+      {/* Tab 2: Miscellaneous Settings */}
+      {currentTab === 2 && (
+      <Card>
+        <CardContent>
+          <Box display="flex" alignItems="center" mb={2}>
+            <Tune sx={{ mr: 1, color: 'primary.main' }} />
+            <Typography variant="h6">Player Settings</Typography>
+          </Box>
+          <Divider sx={{ mb: 3 }} />
+
+          <Typography variant="body2" color="text.secondary" paragraph>
+            Control which music services are enabled in the player. Disabled services won't be available for playback.
+          </Typography>
+
+          <FormGroup>
+            <Box sx={{ mb: 2 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={playerSettings.bandcamp_enabled}
+                    onChange={() => handlePlayerToggle('bandcamp')}
+                    color="primary"
+                  />
+                }
+                label={
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <span style={{ fontSize: '1.5rem' }}>🎵</span>
+                    <Typography variant="body1">Bandcamp Player</Typography>
+                  </Box>
+                }
+              />
+              <Box ml={7} mt={0.5}>
+                <Typography variant="caption" color="text.secondary">
+                  Enable playback of Bandcamp albums and tracks
+                </Typography>
+              </Box>
+            </Box>
+
+            <Box sx={{ mb: 2 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={playerSettings.youtube_enabled}
+                    onChange={() => handlePlayerToggle('youtube')}
+                    color="primary"
+                  />
+                }
+                label={
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <span style={{ fontSize: '1.5rem' }}>▶️</span>
+                    <Typography variant="body1">YouTube Player</Typography>
+                  </Box>
+                }
+              />
+              <Box ml={7} mt={0.5}>
+                <Typography variant="caption" color="text.secondary">
+                  Enable playback of YouTube albums and tracks
+                </Typography>
+              </Box>
+            </Box>
+          </FormGroup>
+
+          <Divider sx={{ my: 3 }} />
+
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            <Typography variant="body2">
+              <strong>Warning:</strong> Disabling a service will prevent users from playing albums from that platform.
+              At least one service should remain enabled for the player to function.
+            </Typography>
+          </Alert>
+
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="body2" color="text.secondary">
+              {[playerSettings.bandcamp_enabled, playerSettings.youtube_enabled].filter(Boolean).length} of 2 services enabled
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<Save />}
+              onClick={handleSavePlayerSettings}
+              disabled={!hasPlayerChanges || saving}
+            >
+              {saving ? 'Saving...' : 'Save Player Settings'}
+            </Button>
+          </Box>
+        </CardContent>
+      </Card>
+      )}
+
+      {/* Info Box */}
       <Box mt={3}>
         <Alert severity="info">
           <Typography variant="body2">
-            <strong>Note:</strong> Changes will take effect immediately for all users. Previously
-            scraped data will retain all platform links in the database, but only enabled platforms
-            will be displayed in the user interface.
+            <strong>Note:</strong> All settings changes will take effect immediately for all users.
           </Typography>
         </Alert>
       </Box>

@@ -1459,6 +1459,55 @@ async def update_cache_settings(settings: dict, token: str = Depends(verify_admi
         logger.error(f"Error updating cache settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to update cache settings")
 
+# Player Settings endpoints
+@app.get("/api/admin/settings/player")
+async def get_player_settings(token: str = Depends(verify_admin_token)):
+    """Get player service settings"""
+    try:
+        bandcamp_enabled = db.get_setting('player_bandcamp_enabled')
+        youtube_enabled = db.get_setting('player_youtube_enabled')
+        
+        # Default to True if not set
+        if bandcamp_enabled is None:
+            bandcamp_enabled = True
+        if youtube_enabled is None:
+            youtube_enabled = True
+        
+        return {
+            "bandcamp_enabled": bool(bandcamp_enabled),
+            "youtube_enabled": bool(youtube_enabled)
+        }
+    except Exception as e:
+        logger.error(f"Error getting player settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get player settings")
+
+@app.put("/api/admin/settings/player")
+async def update_player_settings(settings: dict, token: str = Depends(verify_admin_token)):
+    """Update player service settings"""
+    try:
+        if 'bandcamp_enabled' in settings:
+            db.set_setting(
+                'player_bandcamp_enabled',
+                bool(settings['bandcamp_enabled']),
+                category='player',
+                description='Enable/disable Bandcamp player'
+            )
+            logger.info(f"🎵 [PLAYER] Bandcamp enabled: {settings['bandcamp_enabled']}")
+        
+        if 'youtube_enabled' in settings:
+            db.set_setting(
+                'player_youtube_enabled',
+                bool(settings['youtube_enabled']),
+                category='player',
+                description='Enable/disable YouTube player'
+            )
+            logger.info(f"🎬 [PLAYER] YouTube enabled: {settings['youtube_enabled']}")
+        
+        return {"message": "Player settings updated successfully", "settings": settings}
+    except Exception as e:
+        logger.error(f"Error updating player settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update player settings")
+
 # Authentication endpoints
 @app.get("/api/auth/status")
 async def get_auth_status():

@@ -172,22 +172,33 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
       const track = tracks[currentTrackIndex];
       if (track && track.file_mp3) {
         setTrackLoading(true);  // Start loading
-        audioRef.current.src = track.file_mp3;
-        audioRef.current.load(); // Ensure metadata is loaded
+        const audio = audioRef.current;
         
-        // Auto-play if user has already started playback (e.g., album transitions)
-        // Only skip auto-play on the very first album when player opens
-        if (hasUserStartedPlaybackRef.current) {
-          audioRef.current.play()
-            .then(() => {
-              console.log('Auto-play started (user has started playback)');
-            })
-            .catch(err => {
-              console.error('Playback error:', err);
-            });
-        } else {
-          console.log('First album load - waiting for user to click play');
-        }
+        // Set up one-time listener BEFORE setting src to ensure we catch the event
+        const handleLoadedData = () => {
+          console.log('Audio loaded and ready');
+          setTrackLoading(false);  // Audio is ready
+          
+          // Auto-play if user has already started playback (e.g., album transitions)
+          if (hasUserStartedPlaybackRef.current) {
+            audio.play()
+              .then(() => {
+                console.log('Auto-play started (user has started playback)');
+              })
+              .catch(err => {
+                console.error('Playback error:', err);
+              });
+          } else {
+            console.log('First album load - waiting for user to click play');
+          }
+          
+          // Remove this one-time listener
+          audio.removeEventListener('loadeddata', handleLoadedData);
+        };
+        
+        audio.addEventListener('loadeddata', handleLoadedData);
+        audio.src = track.file_mp3;
+        audio.load(); // Ensure metadata is loaded
       }
     }
   }, [currentTrackIndex, tracks]);
@@ -200,8 +211,9 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
       setIsPlaying(false);
     } else {
       try {
+        // Mark that user has started playback BEFORE attempting to play
+        hasUserStartedPlaybackRef.current = true;
         await audioRef.current.play();
-        hasUserStartedPlaybackRef.current = true;  // Mark that user has started playback
         setIsPlaying(true);
       } catch (err) {
         console.error('Playback error:', err);

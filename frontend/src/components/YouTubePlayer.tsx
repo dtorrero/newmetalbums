@@ -244,25 +244,36 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
       
       if (track && track.stream_url) {
         setTrackLoading(true);  // Start loading
-        audioRef.current.src = track.stream_url;
-        audioRef.current.load();
-        console.log('🎬 [YOUTUBE] Audio element src set, calling load()');
+        const audio = audioRef.current;
         
-        // Auto-play if user has already started playback (e.g., album transitions)
-        // Only skip auto-play on the very first album when player opens
-        if (hasUserStartedPlaybackRef.current) {
-          audioRef.current.play()
-            .then(() => {
-              console.log('🎬 [YOUTUBE] ✅ Auto-play started (user has started playback)');
-            })
-            .catch(err => {
-              console.error('🎬 [YOUTUBE] ❌ Playback error:', err);
-              console.error('🎬 [YOUTUBE] Error name:', err.name);
-              console.error('🎬 [YOUTUBE] Error message:', err.message);
-            });
-        } else {
-          console.log('🎬 [YOUTUBE] First album load - waiting for user to click play');
-        }
+        // Set up one-time listener BEFORE setting src to ensure we catch the event
+        const handleLoadedData = () => {
+          console.log('🎬 [YOUTUBE] Audio loaded and ready');
+          setTrackLoading(false);  // Audio is ready
+          
+          // Auto-play if user has already started playback (e.g., album transitions)
+          if (hasUserStartedPlaybackRef.current) {
+            audio.play()
+              .then(() => {
+                console.log('🎬 [YOUTUBE] ✅ Auto-play started (user has started playback)');
+              })
+              .catch(err => {
+                console.error('🎬 [YOUTUBE] ❌ Playback error:', err);
+                console.error('🎬 [YOUTUBE] Error name:', err.name);
+                console.error('🎬 [YOUTUBE] Error message:', err.message);
+              });
+          } else {
+            console.log('🎬 [YOUTUBE] First album load - waiting for user to click play');
+          }
+          
+          // Remove this one-time listener
+          audio.removeEventListener('loadeddata', handleLoadedData);
+        };
+        
+        audio.addEventListener('loadeddata', handleLoadedData);
+        audio.src = track.stream_url;
+        audio.load();
+        console.log('🎬 [YOUTUBE] Audio element src set, calling load()');
       } else {
         console.error('🎬 [YOUTUBE] ❌ No stream URL available for track');
       }
@@ -277,8 +288,9 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
       setIsPlaying(false);
     } else {
       try {
+        // Mark that user has started playback BEFORE attempting to play
+        hasUserStartedPlaybackRef.current = true;
         await audioRef.current.play();
-        hasUserStartedPlaybackRef.current = true;  // Mark that user has started playback
         setIsPlaying(true);
       } catch (err) {
         console.error('Playback error:', err);
