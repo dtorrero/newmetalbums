@@ -3,11 +3,11 @@ import {
   Box,
   Typography,
   IconButton,
+  Slider,
   List,
   ListItem,
   ListItemButton,
   ListItemText,
-  LinearProgress,
   CircularProgress,
   Alert,
   Chip,
@@ -48,9 +48,9 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [trackLoading, setTrackLoading] = useState(false);
-  
+  const hasUserInteractedRef = useRef(false);  // Track if user has clicked play
+
   const audioRef = useRef<HTMLAudioElement>(null);
-  const hasUserStartedPlaybackRef = useRef(false);
 
   // Fetch tracks from backend
   useEffect(() => {
@@ -166,39 +166,48 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     };
   }, [currentTrackIndex, tracks.length]);
 
-  // Load track when index changes
+  // Load track when index changes - SIMPLIFIED
   useEffect(() => {
     if (tracks.length > 0 && audioRef.current) {
       const track = tracks[currentTrackIndex];
       if (track && track.file_mp3) {
-        setTrackLoading(true);  // Start loading
+        console.log('🎵 [BANDCAMP] Loading track:', track.title);
+        setTrackLoading(true);
         const audio = audioRef.current;
         
-        // Set up one-time listener BEFORE setting src to ensure we catch the event
-        const handleLoadedData = () => {
-          console.log('Audio loaded and ready');
-          setTrackLoading(false);  // Audio is ready
+        // Simple approach: load and auto-play when ready (if user has interacted)
+        const handleCanPlay = () => {
+          console.log('🎵 [BANDCAMP] Track ready');
+          setTrackLoading(false);
           
-          // Auto-play if user has already started playback (e.g., album transitions)
-          if (hasUserStartedPlaybackRef.current) {
+          // Only auto-play if user has clicked play before (browser autoplay policy)
+          if (hasUserInteractedRef.current) {
+            console.log('🎵 [BANDCAMP] Auto-playing...');
             audio.play()
               .then(() => {
-                console.log('Auto-play started (user has started playback)');
+                console.log('🎵 [BANDCAMP] ✅ Playing');
+                setIsPlaying(true);
               })
               .catch(err => {
-                console.error('Playback error:', err);
+                console.error('🎵 [BANDCAMP] ❌ Play failed:', err);
+                setIsPlaying(false);
               });
           } else {
-            console.log('First album load - waiting for user to click play');
+            console.log('🎵 [BANDCAMP] Waiting for user to click play (first album)');
           }
           
-          // Remove this one-time listener
-          audio.removeEventListener('loadeddata', handleLoadedData);
+          // Remove listener after first use
+          audio.removeEventListener('canplaythrough', handleCanPlay);
         };
         
-        audio.addEventListener('loadeddata', handleLoadedData);
+        audio.addEventListener('canplaythrough', handleCanPlay);
         audio.src = track.file_mp3;
-        audio.load(); // Ensure metadata is loaded
+        audio.load();
+        
+        // Cleanup
+        return () => {
+          audio.removeEventListener('canplaythrough', handleCanPlay);
+        };
       }
     }
   }, [currentTrackIndex, tracks]);
@@ -207,17 +216,22 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     if (!audioRef.current) return;
     
     if (isPlaying) {
+      console.log('🎵 [BANDCAMP] Pausing');
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
+      console.log('🎵 [BANDCAMP] User clicked play');
+      hasUserInteractedRef.current = true;  // Mark that user has interacted
+      setTrackLoading(true);
       try {
-        // Mark that user has started playback BEFORE attempting to play
-        hasUserStartedPlaybackRef.current = true;
         await audioRef.current.play();
+        console.log('🎵 [BANDCAMP] ✅ Playing');
         setIsPlaying(true);
+        setTrackLoading(false);
       } catch (err) {
-        console.error('Playback error:', err);
+        console.error('🎵 [BANDCAMP] ❌ Play error:', err);
         setIsPlaying(false);
+        setTrackLoading(false);
       }
     }
   };

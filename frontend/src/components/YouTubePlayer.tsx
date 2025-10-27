@@ -46,11 +46,10 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
   const [trackLoading, setTrackLoading] = useState(false);
+  const hasUserInteractedRef = useRef(false);  // Track if user has clicked play
   
   const audioRef = useRef<HTMLAudioElement>(null);
-  const hasUserStartedPlaybackRef = useRef(false);
 
   // Fetch stream URLs from backend
   useEffect(() => {
@@ -235,7 +234,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     };
   }, [currentTrackIndex, tracks.length]);
 
-  // Load track when index changes
+  // Load track when index changes - SIMPLIFIED
   useEffect(() => {
     if (tracks.length > 0 && audioRef.current) {
       const track = tracks[currentTrackIndex];
@@ -243,37 +242,43 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
       console.log('🎬 [YOUTUBE] Stream URL:', track?.stream_url?.substring(0, 100) + '...');
       
       if (track && track.stream_url) {
-        setTrackLoading(true);  // Start loading
+        setTrackLoading(true);
         const audio = audioRef.current;
         
-        // Set up one-time listener BEFORE setting src to ensure we catch the event
-        const handleLoadedData = () => {
-          console.log('🎬 [YOUTUBE] Audio loaded and ready');
-          setTrackLoading(false);  // Audio is ready
+        // Simple approach: load and auto-play when ready (if user has interacted)
+        const handleCanPlay = () => {
+          console.log('🎬 [YOUTUBE] Track ready');
+          setTrackLoading(false);
           
-          // Auto-play if user has already started playback (e.g., album transitions)
-          if (hasUserStartedPlaybackRef.current) {
+          // Only auto-play if user has clicked play before (browser autoplay policy)
+          if (hasUserInteractedRef.current) {
+            console.log('🎬 [YOUTUBE] Auto-playing...');
             audio.play()
               .then(() => {
-                console.log('🎬 [YOUTUBE] ✅ Auto-play started (user has started playback)');
+                console.log('🎬 [YOUTUBE] ✅ Playing');
+                setIsPlaying(true);
               })
               .catch(err => {
-                console.error('🎬 [YOUTUBE] ❌ Playback error:', err);
-                console.error('🎬 [YOUTUBE] Error name:', err.name);
-                console.error('🎬 [YOUTUBE] Error message:', err.message);
+                console.error('🎬 [YOUTUBE] ❌ Play failed:', err);
+                setIsPlaying(false);
               });
           } else {
-            console.log('🎬 [YOUTUBE] First album load - waiting for user to click play');
+            console.log('🎬 [YOUTUBE] Waiting for user to click play (first album)');
           }
           
-          // Remove this one-time listener
-          audio.removeEventListener('loadeddata', handleLoadedData);
+          // Remove listener after first use
+          audio.removeEventListener('canplaythrough', handleCanPlay);
         };
         
-        audio.addEventListener('loadeddata', handleLoadedData);
+        audio.addEventListener('canplaythrough', handleCanPlay);
         audio.src = track.stream_url;
         audio.load();
         console.log('🎬 [YOUTUBE] Audio element src set, calling load()');
+        
+        // Cleanup
+        return () => {
+          audio.removeEventListener('canplaythrough', handleCanPlay);
+        };
       } else {
         console.error('🎬 [YOUTUBE] ❌ No stream URL available for track');
       }
@@ -284,17 +289,22 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     if (!audioRef.current) return;
     
     if (isPlaying) {
+      console.log('🎬 [YOUTUBE] Pausing');
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
+      console.log('🎬 [YOUTUBE] User clicked play');
+      hasUserInteractedRef.current = true;  // Mark that user has interacted
+      setTrackLoading(true);
       try {
-        // Mark that user has started playback BEFORE attempting to play
-        hasUserStartedPlaybackRef.current = true;
         await audioRef.current.play();
+        console.log('🎬 [YOUTUBE] ✅ Playing');
         setIsPlaying(true);
+        setTrackLoading(false);
       } catch (err) {
-        console.error('Playback error:', err);
+        console.error('🎬 [YOUTUBE] ❌ Play error:', err);
         setIsPlaying(false);
+        setTrackLoading(false);
       }
     }
   };
@@ -323,15 +333,9 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', p: 4, gap: 2 }}>
         <CircularProgress />
-        {downloadProgress ? (
-          <Typography variant="caption" color="text.secondary" align="center">
-            {downloadProgress}
-          </Typography>
-        ) : (
-          <Typography variant="caption" color="text.secondary">
-            Loading YouTube stream...
-          </Typography>
-        )}
+        <Typography variant="caption" color="text.secondary">
+          Loading YouTube audio...
+        </Typography>
       </Box>
     );
   }
