@@ -29,6 +29,8 @@ from models import (
 from auth_manager import AuthManager
 from genre_parser import GenreParser
 from platform_verifier import PlatformVerifier
+from youtube_cache_manager import YouTubeCacheManager
+import config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +40,12 @@ db = AlbumsDatabase()
 
 # Global auth manager instance
 auth_manager = AuthManager()
+
+# Global YouTube cache manager
+youtube_cache = YouTubeCacheManager(
+    cache_dir=str(config.YOUTUBE_CACHE_DIR),
+    max_size_gb=config.YOUTUBE_CACHE_MAX_SIZE_GB
+)
 
 # Global scraping lock to prevent multiple instances
 scraping_lock = asyncio.Lock()
@@ -927,17 +935,38 @@ async def stop_scraping(token: str = Depends(verify_admin_token)):
 async def get_youtube_audio(video_id: str):
     """
     Download and cache YouTube audio, then serve it.
-    Uses yt-dlp to download audio to a cache directory.
+    Uses yt-dlp to download audio to a cache directory with LRU eviction.
     """
-    import os
-    import hashlib
-    from pathlib import Path
     from fastapi.responses import FileResponse
     
     logger.info(f"🎬 [YOUTUBE/CACHE] Request for video: {video_id}")
     
-    # Create cache directory
-    cache_dir = Path("youtube_cache")
+    # Check if already cached
+    cached_file = youtube_cache.get_cached_file(video_id)
+    if cached_file:
+        file_size_mb = cached_file.stat().st_size / 1024 / 1024
+        logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Serving from cache: {cached_file.name} ({file_size_mb:.2f} MB)")
+        
+        # Determine media type
+        media_type = "audio/webm"
+        if cached_file.suffix == '.mp4' or cached_file.suffix == '.m4a':
+            media_type = "audio/mp4"
+        elif cached_file.suffix == '.opus':
+            media_type = "audio/opus"
+        elif cached_file.suffix == '.ogg':
+            media_type = "audio/ogg"
+        
+        return FileResponse(
+            cached_file,
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=31536000",
+            }
+        )
+    
+    # Not cached - need to download
+    cache_dir = Path(config.YOUTUBE_CACHE_DIR)
     cache_dir.mkdir(exist_ok=True)
     
     # Use video ID as filename (safe for filesystem)
@@ -952,30 +981,8 @@ async def get_youtube_audio(video_id: str):
     if ytdl_file.exists():
         ytdl_file.unlink()
     
-    # Check if already cached (try all possible extensions)
-    for ext in ['.mp4', '.webm', '.m4a', '.opus', '.ogg']:
-        cached_file = cache_file.with_suffix(ext)
-        if cached_file.exists():
-            file_size_mb = cached_file.stat().st_size / 1024 / 1024
-            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Serving from cache: {cached_file.name} ({file_size_mb:.2f} MB)")
-            
-            # Determine media type
-            media_type = "audio/webm"
-            if ext == '.mp4' or ext == '.m4a':
-                media_type = "audio/mp4"
-            elif ext == '.opus':
-                media_type = "audio/opus"
-            elif ext == '.ogg':
-                media_type = "audio/ogg"
-            
-            return FileResponse(
-                cached_file,
-                media_type=media_type,
-                headers={
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
-                }
-            )
+    # Cleanup cache if needed (estimate 10MB for new file)
+    youtube_cache.cleanup_if_needed(10 * 1024 * 1024)
     
     # Download using yt-dlp
     try:
@@ -1038,9 +1045,13 @@ async def get_youtube_audio(video_id: str):
             elif cache_file.suffix == '.ogg':
                 media_type = "audio/ogg"
             
-            # Log file size
-            file_size_mb = cache_file.stat().st_size / 1024 / 1024
+            # Log file size and add to cache manager
+            file_size = cache_file.stat().st_size
+            file_size_mb = file_size / 1024 / 1024
             logger.info(f"🎬 [YOUTUBE/CACHE] Serving file: {cache_file.name} ({media_type}, {file_size_mb:.2f} MB)")
+            
+            # Add to cache manager
+            youtube_cache.add_file(video_id, cache_file.name, file_size)
             
             return FileResponse(
                 cache_file,
@@ -1380,6 +1391,73 @@ async def get_public_platform_link_settings():
         settings[platform_name] = visible
     
     return {"settings": settings}
+
+# YouTube Cache Management endpoints
+@app.get("/api/admin/cache/stats")
+async def get_cache_stats(token: str = Depends(verify_admin_token)):
+    """Get YouTube cache statistics"""
+    try:
+        stats = youtube_cache.get_cache_stats()
+        return {"stats": stats}
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get cache stats")
+
+@app.post("/api/admin/cache/clear")
+async def clear_cache(token: str = Depends(verify_admin_token)):
+    """Clear entire YouTube cache"""
+    try:
+        youtube_cache.clear_cache()
+        return {"message": "Cache cleared successfully"}
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear cache")
+
+@app.get("/api/admin/settings/cache")
+async def get_cache_settings(token: str = Depends(verify_admin_token)):
+    """Get YouTube cache settings"""
+    try:
+        max_size_gb = db.get_setting('youtube_cache_max_size_gb')
+        if max_size_gb is None:
+            max_size_gb = config.YOUTUBE_CACHE_MAX_SIZE_GB
+        
+        return {
+            "youtube_cache_max_size_gb": float(max_size_gb)
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get cache settings")
+
+@app.put("/api/admin/settings/cache")
+async def update_cache_settings(settings: dict, token: str = Depends(verify_admin_token)):
+    """Update YouTube cache settings"""
+    try:
+        if 'youtube_cache_max_size_gb' in settings:
+            new_size = float(settings['youtube_cache_max_size_gb'])
+            
+            # Validate size (must be positive, reasonable limit of 100GB)
+            if new_size <= 0 or new_size > 100:
+                raise HTTPException(status_code=400, detail="Cache size must be between 0 and 100 GB")
+            
+            # Save to database
+            db.set_setting(
+                'youtube_cache_max_size_gb',
+                new_size,
+                category='cache',
+                description='Maximum YouTube cache size in gigabytes'
+            )
+            
+            # Update cache manager
+            youtube_cache.update_max_size(new_size)
+            
+            logger.info(f"📦 [CACHE] Settings updated: max_size={new_size} GB")
+        
+        return {"message": "Cache settings updated successfully", "settings": settings}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating cache settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update cache settings")
 
 # Authentication endpoints
 @app.get("/api/auth/status")

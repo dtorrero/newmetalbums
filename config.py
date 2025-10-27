@@ -97,3 +97,7 @@ LINK_EXTRACTION = {
         }
     }
 }
+
+# YouTube Cache settings
+YOUTUBE_CACHE_DIR = Path("youtube_cache")
+YOUTUBE_CACHE_MAX_SIZE_GB = 5.0  # Maximum cache size in gigabytes (can use decimals)

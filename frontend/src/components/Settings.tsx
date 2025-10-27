@@ -12,8 +12,15 @@ import {
   CircularProgress,
   Divider,
   Container,
+  TextField,
+  InputAdornment,
+  LinearProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
-import { Save, Refresh, ArrowBack } from '@mui/icons-material';
+import { Save, Refresh, ArrowBack, Storage, Delete, Info } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { authFetch } from '../utils/auth';
 
@@ -25,6 +32,22 @@ interface PlatformSetting {
 
 interface PlatformSettings {
   [key: string]: PlatformSetting;
+}
+
+interface CacheStats {
+  total_size_bytes: number;
+  total_size_mb: number;
+  total_size_gb: number;
+  max_size_bytes: number;
+  max_size_gb: number;
+  usage_percent: number;
+  file_count: number;
+  available_bytes: number;
+  available_gb: number;
+}
+
+interface CacheSettings {
+  youtube_cache_max_size_gb: number;
 }
 
 const PLATFORM_ICONS: { [key: string]: string } = {
@@ -44,6 +67,12 @@ const Settings: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  
+  // Cache settings state
+  const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
+  const [cacheSettings, setCacheSettings] = useState<CacheSettings>({ youtube_cache_max_size_gb: 5.0 });
+  const [originalCacheSettings, setOriginalCacheSettings] = useState<CacheSettings>({ youtube_cache_max_size_gb: 5.0 });
+  const [clearCacheDialog, setClearCacheDialog] = useState(false);
 
   // Get API base URL - in production, nginx proxies everything, so use relative URLs
   const getApiBase = () => {
@@ -57,6 +86,12 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     loadSettings();
+    loadCacheSettings();
+    loadCacheStats();
+    
+    // Refresh cache stats every 30 seconds
+    const interval = setInterval(loadCacheStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadSettings = async () => {
@@ -135,6 +170,89 @@ const Settings: React.FC = () => {
       setSaving(false);
     }
   };
+
+  const loadCacheStats = async () => {
+    try {
+      const response = await authFetch(`${API_BASE}/api/admin/cache/stats`);
+      if (response.ok) {
+        const data = await response.json();
+        setCacheStats(data.stats);
+      }
+    } catch (error) {
+      console.error('Error fetching cache stats:', error);
+    }
+  };
+
+  const loadCacheSettings = async () => {
+    try {
+      const response = await authFetch(`${API_BASE}/api/admin/settings/cache`);
+      if (response.ok) {
+        const data = await response.json();
+        setCacheSettings(data);
+        setOriginalCacheSettings(data);
+      }
+    } catch (error) {
+      console.error('Error fetching cache settings:', error);
+    }
+  };
+
+  const handleSaveCacheSettings = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+      
+      const response = await authFetch(`${API_BASE}/api/admin/settings/cache`, {
+        method: 'PUT',
+        body: JSON.stringify(cacheSettings),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to save cache settings');
+      }
+      
+      setOriginalCacheSettings(cacheSettings);
+      setSuccess('Cache settings saved successfully!');
+      await loadCacheStats();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save cache settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    try {
+      const response = await authFetch(`${API_BASE}/api/admin/cache/clear`, {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        setSuccess('Cache cleared successfully!');
+        setClearCacheDialog(false);
+        await loadCacheStats();
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        setError('Failed to clear cache');
+      }
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      setError('Failed to clear cache');
+    }
+  };
+
+  const handleCacheSizeChange = (value: string) => {
+    const numValue = parseFloat(value);
+    if (!isNaN(numValue) && numValue >= 0 && numValue <= 100) {
+      setCacheSettings({ ...cacheSettings, youtube_cache_max_size_gb: numValue });
+      setSuccess(null);
+    }
+  };
+
+  const hasCacheChanges = cacheSettings.youtube_cache_max_size_gb !== originalCacheSettings.youtube_cache_max_size_gb;
 
   if (loading) {
     return (
@@ -241,6 +359,100 @@ const Settings: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* YouTube Cache Settings */}
+      <Card sx={{ mt: 3 }}>
+        <CardContent>
+          <Box display="flex" alignItems="center" mb={2}>
+            <Storage sx={{ mr: 1, color: 'primary.main' }} />
+            <Typography variant="h6">YouTube Cache Settings</Typography>
+          </Box>
+          <Divider sx={{ mb: 3 }} />
+
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, mb: 3 }}>
+            <Box sx={{ flex: 1 }}>
+              <TextField
+                label="Maximum Cache Size"
+                type="number"
+                value={cacheSettings.youtube_cache_max_size_gb}
+                onChange={(e) => handleCacheSizeChange(e.target.value)}
+                fullWidth
+                inputProps={{ min: 0.1, max: 100, step: 0.5 }}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">GB</InputAdornment>,
+                }}
+                helperText="Set maximum cache size (0.1 - 100 GB). Supports decimals like 2.5"
+              />
+            </Box>
+
+            {cacheStats && (
+              <Box sx={{ flex: 1 }}>
+                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                    Current Usage
+                  </Typography>
+                  <Typography variant="h5" gutterBottom>
+                    {cacheStats.total_size_gb.toFixed(2)} GB / {cacheStats.max_size_gb.toFixed(2)} GB
+                  </Typography>
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.min(cacheStats.usage_percent, 100)}
+                    sx={{ mb: 1, height: 8, borderRadius: 1 }}
+                    color={cacheStats.usage_percent > 90 ? 'error' : cacheStats.usage_percent > 70 ? 'warning' : 'primary'}
+                  />
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      {cacheStats.file_count} files
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {cacheStats.usage_percent.toFixed(1)}% used
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Available: {cacheStats.available_gb.toFixed(2)} GB
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+          </Box>
+
+          <Alert severity="info" icon={<Info />} sx={{ mb: 3 }}>
+            <Typography variant="body2">
+              <strong>How it works:</strong> The cache uses LRU (Least Recently Used) eviction. 
+              When the cache is full, the oldest accessed files are automatically deleted to make room for new downloads.
+              Frequently played songs stay in cache longer.
+            </Typography>
+          </Alert>
+
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Box display="flex" gap={2}>
+              <Button
+                variant="contained"
+                startIcon={<Save />}
+                onClick={handleSaveCacheSettings}
+                disabled={!hasCacheChanges || saving}
+              >
+                {saving ? 'Saving...' : 'Save Cache Settings'}
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<Refresh />}
+                onClick={loadCacheStats}
+              >
+                Refresh Stats
+              </Button>
+            </Box>
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<Delete />}
+              onClick={() => setClearCacheDialog(true)}
+            >
+              Clear Cache
+            </Button>
+          </Box>
+        </CardContent>
+      </Card>
+
       <Box mt={3}>
         <Alert severity="info">
           <Typography variant="body2">
@@ -250,6 +462,26 @@ const Settings: React.FC = () => {
           </Typography>
         </Alert>
       </Box>
+
+      {/* Clear Cache Confirmation Dialog */}
+      <Dialog open={clearCacheDialog} onClose={() => setClearCacheDialog(false)}>
+        <DialogTitle>Clear YouTube Cache?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            This will delete all cached YouTube audio files ({cacheStats?.file_count || 0} files, {cacheStats?.total_size_gb.toFixed(2) || 0} GB).
+            Songs will need to be re-downloaded when played again.
+          </Typography>
+          <Typography sx={{ mt: 2 }} color="warning.main">
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setClearCacheDialog(false)}>Cancel</Button>
+          <Button onClick={handleClearCache} color="error" variant="contained">
+            Clear Cache
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
