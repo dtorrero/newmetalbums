@@ -47,6 +47,10 @@ youtube_cache = YouTubeCacheManager(
     max_size_gb=config.YOUTUBE_CACHE_MAX_SIZE_GB
 )
 
+# Track active downloads to prevent duplicates and allow cancellation
+active_downloads: Dict[str, asyncio.Task] = {}
+download_locks: Dict[str, asyncio.Lock] = {}
+
 # Global scraping lock to prevent multiple instances
 scraping_lock = asyncio.Lock()
 
@@ -938,6 +942,7 @@ async def get_youtube_audio(video_id: str):
     Uses yt-dlp to download audio to a cache directory with LRU eviction.
     """
     from fastapi.responses import FileResponse
+    import yt_dlp
     
     logger.info(f"🎬 [YOUTUBE/CACHE] Request for video: {video_id}")
     
@@ -966,61 +971,117 @@ async def get_youtube_audio(video_id: str):
         )
     
     # Not cached - need to download
-    cache_dir = Path(config.YOUTUBE_CACHE_DIR)
-    cache_dir.mkdir(exist_ok=True)
+    # Use a lock to prevent concurrent downloads of the same video
+    if video_id not in download_locks:
+        download_locks[video_id] = asyncio.Lock()
     
-    # Use video ID as filename (safe for filesystem)
-    cache_file = cache_dir / f"{video_id}.webm"
-    
-    # Clean up any partial downloads from previous attempts
-    part_file = Path(str(cache_file) + '.part')
-    ytdl_file = Path(str(cache_file) + '.ytdl')
-    if part_file.exists():
-        logger.info(f"🎬 [YOUTUBE/CACHE] Cleaning up partial download: {part_file.name}")
-        part_file.unlink()
-    if ytdl_file.exists():
-        ytdl_file.unlink()
-    
-    # Cleanup cache if needed (estimate 10MB for new file)
-    youtube_cache.cleanup_if_needed(10 * 1024 * 1024)
-    
-    # Download using yt-dlp
-    try:
-        import yt_dlp
-        
-        logger.info(f"🎬 [YOUTUBE/CACHE] Downloading audio for: {video_id}")
-        
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        
-        ydl_opts = {
-            # Prefer smaller audio formats: opus (best compression), m4a, then fallback
-            'format': 'bestaudio[ext=opus]/bestaudio[ext=m4a]/bestaudio[ext=webm]/ba/b',
-            'outtmpl': str(cache_file.with_suffix('.%(ext)s')),  # Let yt-dlp add the extension
-            'quiet': False,
-            'no_warnings': False,
-            'logger': logger,
-            # Use actual player JS version to avoid signature extraction issues
-            'extractor_args': {
-                'youtube': {
-                    'player_js_version': ['actual'],  # Must be a list
+    async with download_locks[video_id]:
+        # Check cache again in case another request downloaded it while we waited
+        cached_file = youtube_cache.get_cached_file(video_id)
+        if cached_file:
+            file_size_mb = cached_file.stat().st_size / 1024 / 1024
+            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Serving from cache (downloaded by another request): {cached_file.name} ({file_size_mb:.2f} MB)")
+            
+            media_type = "audio/webm"
+            if cached_file.suffix == '.mp4' or cached_file.suffix == '.m4a':
+                media_type = "audio/mp4"
+            elif cached_file.suffix == '.opus':
+                media_type = "audio/opus"
+            elif cached_file.suffix == '.ogg':
+                media_type = "audio/ogg"
+            
+            return FileResponse(
+                cached_file,
+                media_type=media_type,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "public, max-age=31536000",
                 }
-            },
-            'nocheckcertificate': True,
-            'geo_bypass': True,
-            # Prefer smaller file sizes
-            'prefer_free_formats': True,
-            'postprocessors': [],  # No post-processing
-        }
+            )
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=True)
+        cache_dir = Path(config.YOUTUBE_CACHE_DIR)
+        cache_dir.mkdir(exist_ok=True)
+        
+        # Use video ID as filename (safe for filesystem)
+        cache_file = cache_dir / f"{video_id}.webm"
+        
+        # Clean up any partial downloads from previous attempts (including fragments)
+        logger.info(f"🎬 [YOUTUBE/CACHE] Cleaning up any previous partial downloads for: {video_id}")
+        for pattern in [f"{video_id}*"]:
+            for old_file in cache_dir.glob(pattern):
+                if '.part' in old_file.name or '.ytdl' in old_file.name or 'Frag' in old_file.name:
+                    try:
+                        old_file.unlink()
+                        logger.debug(f"🎬 [YOUTUBE/CACHE] Deleted: {old_file.name}")
+                    except Exception as e:
+                        logger.warning(f"🎬 [YOUTUBE/CACHE] Could not delete {old_file.name}: {e}")
+        
+        # Cleanup cache if needed (estimate 10MB for new file)
+        youtube_cache.cleanup_if_needed(10 * 1024 * 1024)
+        
+        # Download using yt-dlp (async to avoid blocking server)
+        try:
+            logger.info(f"🎬 [YOUTUBE/CACHE] Downloading audio for: {video_id}")
+            
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            
+            # First, get info without downloading to check file size
+            def get_info():
+                ydl_opts_info = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'skip_download': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                    return ydl.extract_info(video_url, download=False)
+            
+            # Run info extraction in thread pool to avoid blocking
+            info_only = await asyncio.to_thread(get_info)
+            
+            if info_only:
+                # Get estimated file size
+                filesize = info_only.get('filesize') or info_only.get('filesize_approx', 0)
+                filesize_mb = filesize / 1024 / 1024 if filesize else 0
+                
+                if filesize_mb > 50:
+                    logger.warning(f"🎬 [YOUTUBE/CACHE] ⚠️ Large file detected: {filesize_mb:.1f} MB")
+                
+                logger.info(f"🎬 [YOUTUBE/CACHE] Estimated size: {filesize_mb:.1f} MB")
+            
+            # Now download
+            def download_audio():
+                ydl_opts = {
+                    # Prefer smaller audio formats: opus (best compression), m4a, then fallback
+                    'format': 'bestaudio[ext=opus]/bestaudio[ext=m4a]/bestaudio[ext=webm]/ba/b',
+                    'outtmpl': str(cache_file.with_suffix('.%(ext)s')),  # Let yt-dlp add the extension
+                    'quiet': False,
+                    'no_warnings': False,
+                    'logger': logger,
+                    # Use actual player JS version to avoid signature extraction issues
+                    'extractor_args': {
+                        'youtube': {
+                            'player_js_version': ['actual'],  # Must be a list
+                        }
+                    },
+                    'nocheckcertificate': True,
+                    'geo_bypass': True,
+                    # Prefer smaller file sizes
+                    'prefer_free_formats': True,
+                    'postprocessors': [],  # No post-processing
+                }
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(video_url, download=True)
+            
+            # Run download in thread pool to avoid blocking the server
+            info = await asyncio.to_thread(download_audio)
             
             if not info:
                 raise HTTPException(status_code=404, detail="Could not download video")
             
-            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Downloaded successfully")
+            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Download completed")
             
-            # Find the downloaded file (yt-dlp might add extension) and log size
+            # Find the downloaded file (yt-dlp might add extension)
             if not cache_file.exists():
                 # Try common extensions
                 for ext in ['.webm', '.m4a', '.mp4', '.opus', '.ogg']:
@@ -1034,6 +1095,16 @@ async def get_youtube_audio(video_id: str):
                 logger.error(f"🎬 [YOUTUBE/CACHE] File not found after download")
                 raise HTTPException(status_code=500, detail="Download succeeded but file not found")
             
+            # Verify file is not empty
+            file_size = cache_file.stat().st_size
+            if file_size == 0:
+                logger.error(f"🎬 [YOUTUBE/CACHE] Downloaded file is empty")
+                cache_file.unlink()  # Delete empty file
+                raise HTTPException(status_code=500, detail="Downloaded file is empty. Video may be unavailable.")
+            
+            file_size_mb = file_size / 1024 / 1024
+            logger.info(f"🎬 [YOUTUBE/CACHE] File verified: {cache_file.name} ({file_size_mb:.2f} MB)")
+            
             # Determine media type based on extension
             media_type = "audio/webm"
             if cache_file.suffix == '.mp4':
@@ -1045,13 +1116,9 @@ async def get_youtube_audio(video_id: str):
             elif cache_file.suffix == '.ogg':
                 media_type = "audio/ogg"
             
-            # Log file size and add to cache manager
-            file_size = cache_file.stat().st_size
-            file_size_mb = file_size / 1024 / 1024
-            logger.info(f"🎬 [YOUTUBE/CACHE] Serving file: {cache_file.name} ({media_type}, {file_size_mb:.2f} MB)")
-            
-            # Add to cache manager
+            # Add to cache manager ONLY after successful verification
             youtube_cache.add_file(video_id, cache_file.name, file_size)
+            logger.info(f"🎬 [YOUTUBE/CACHE] Serving file: {cache_file.name} ({media_type}, {file_size_mb:.2f} MB)")
             
             return FileResponse(
                 cache_file,
@@ -1061,12 +1128,20 @@ async def get_youtube_audio(video_id: str):
                     "Cache-Control": "public, max-age=31536000",
                 }
             )
-            
-    except Exception as e:
-        logger.error(f"🎬 [YOUTUBE/CACHE] ❌ Error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            # Clean up any partial files on error
+            logger.error(f"🎬 [YOUTUBE/CACHE] ❌ Error: {e}")
+            for ext in ['.webm', '.m4a', '.mp4', '.opus', '.ogg']:
+                failed_file = cache_file.with_suffix(ext)
+                if failed_file.exists():
+                    logger.info(f"🎬 [YOUTUBE/CACHE] Cleaning up failed download: {failed_file.name}")
+                    try:
+                        failed_file.unlink()
+                    except:
+                        pass
+            import traceback
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Failed to download YouTube audio. The video may be unavailable or restricted. Error: {str(e)}")
 
 @app.get("/api/youtube/stream")
 async def get_youtube_stream(url: str):

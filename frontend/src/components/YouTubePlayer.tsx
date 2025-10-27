@@ -31,6 +31,7 @@ interface YouTubePlayerProps {
   albumTitle?: string;
   artist?: string;
   onAlbumEnd?: () => void;
+  hasUserInteractedRef?: React.RefObject<boolean>;
 }
 
 export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
@@ -38,6 +39,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   albumTitle,
   artist,
   onAlbumEnd,
+  hasUserInteractedRef: externalHasUserInteractedRef,
 }) => {
   const [tracks, setTracks] = useState<YouTubeTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +49,9 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [trackLoading, setTrackLoading] = useState(false);
-  const hasUserInteractedRef = useRef(false);  // Track if user has clicked play
+  const internalHasUserInteractedRef = useRef(false);  // Local fallback
+  // Use external ref if provided, otherwise use internal
+  const hasUserInteractedRef = externalHasUserInteractedRef || internalHasUserInteractedRef;
   
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -91,7 +95,8 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
         );
         
         if (!response.ok) {
-          throw new Error('Failed to load YouTube stream');
+          const errorData = await response.json().catch(() => ({ detail: 'Failed to load YouTube stream' }));
+          throw new Error(errorData.detail || 'Failed to load YouTube stream');
         }
         
         const data = await response.json();

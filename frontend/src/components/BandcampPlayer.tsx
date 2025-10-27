@@ -32,6 +32,7 @@ interface BandcampPlayerProps {
   albumTitle?: string;
   artist?: string;
   onAlbumEnd?: () => void;
+  hasUserInteractedRef?: React.RefObject<boolean>;
 }
 
 export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
@@ -39,6 +40,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
   albumTitle,
   artist,
   onAlbumEnd,
+  hasUserInteractedRef: externalHasUserInteractedRef,
 }) => {
   const [tracks, setTracks] = useState<BandcampTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,9 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [trackLoading, setTrackLoading] = useState(false);
-  const hasUserInteractedRef = useRef(false);  // Track if user has clicked play
+  const internalHasUserInteractedRef = useRef(false);  // Local fallback
+  // Use external ref if provided, otherwise use internal
+  const hasUserInteractedRef = externalHasUserInteractedRef || internalHasUserInteractedRef;
 
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -90,8 +94,12 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     fetchTracks();
   }, [bandcampUrl]);
 
-  const handleNext = () => {
+  const handleNext = (autoAdvance = false) => {
     if (currentTrackIndex < tracks.length - 1) {
+      // If auto-advancing (track ended), mark that we should auto-play next track
+      if (autoAdvance && !hasUserInteractedRef.current) {
+        hasUserInteractedRef.current = true;
+      }
       setCurrentTrackIndex(currentTrackIndex + 1);
     } else {
       // Last track finished - notify parent to go to next album
@@ -127,7 +135,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     };
     const handleEnded = () => {
       console.log('Track ended, moving to next');
-      handleNext();
+      handleNext(true); // Pass true to indicate auto-advance
     };
     const handlePlay = () => {
       console.log('Audio play event fired');
@@ -373,7 +381,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
           {trackLoading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : (isPlaying ? <Pause /> : <PlayArrow />)}
         </IconButton>
         
-        <IconButton onClick={handleNext} disabled={tracks.length <= 1}>
+        <IconButton onClick={() => handleNext(false)} disabled={tracks.length <= 1}>
           <SkipNext />
         </IconButton>
       </Box>

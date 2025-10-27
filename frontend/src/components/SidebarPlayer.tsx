@@ -58,35 +58,62 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     const saved = localStorage.getItem('player_platform_preference');
     return (saved as 'bandcamp' | 'youtube') || 'bandcamp'; // Default to Bandcamp
   });
+  
+  // Player settings from admin (which services are enabled)
+  const [playerSettings, setPlayerSettings] = useState({
+    bandcamp_enabled: true,
+    youtube_enabled: true,
+  });
+  
+  // Shared user interaction state - passed to both players
+  const hasUserInteractedRef = useRef(false);
 
   const youtubeRef = useRef<HTMLIFrameElement>(null);
   const bandcampRef = useRef<HTMLIFrameElement>(null);
 
   const currentItem = playlist[playerState.currentIndex];
+  
+  // Fetch player settings on mount
+  useEffect(() => {
+    const fetchPlayerSettings = async () => {
+      try {
+        const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+        const response = await fetch(`${baseUrl}/api/admin/settings/player`);
+        if (response.ok) {
+          const data = await response.json();
+          setPlayerSettings(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch player settings:', error);
+      }
+    };
+    fetchPlayerSettings();
+  }, []);
 
-  // Determine which platform to show based on user preference
+  // Determine which platform to show based on user preference AND admin settings
   useEffect(() => {
     if (!currentItem) return;
 
     // Try user's preferred platform first, fallback to the other
+    // BUT respect admin settings - only use enabled services
     let selectedPlatform: 'youtube' | 'bandcamp' | null = null;
     
     if (platformPreference === 'bandcamp') {
-      if (currentItem.platforms.bandcamp) {
+      if (currentItem.platforms.bandcamp && playerSettings.bandcamp_enabled) {
         selectedPlatform = 'bandcamp';
-      } else if (currentItem.platforms.youtube) {
+      } else if (currentItem.platforms.youtube && playerSettings.youtube_enabled) {
         selectedPlatform = 'youtube';
       }
     } else {
-      if (currentItem.platforms.youtube) {
+      if (currentItem.platforms.youtube && playerSettings.youtube_enabled) {
         selectedPlatform = 'youtube';
-      } else if (currentItem.platforms.bandcamp) {
+      } else if (currentItem.platforms.bandcamp && playerSettings.bandcamp_enabled) {
         selectedPlatform = 'bandcamp';
       }
     }
 
     setPlayerState(prev => ({ ...prev, currentPlatform: selectedPlatform, isPlaying: false }));
-  }, [currentItem, platformPreference]);
+  }, [currentItem, platformPreference, playerSettings]);
   
   // Auto-play YouTube when play button is clicked
   useEffect(() => {
@@ -251,15 +278,16 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
           </Box>
         </Box>
 
-        {/* Platform Selection */}
-        {currentItem.platforms.youtube && currentItem.platforms.bandcamp && (
+        {/* Platform Selection - Only show if both platforms available AND enabled */}
+        {currentItem.platforms.youtube && currentItem.platforms.bandcamp && 
+         playerSettings.youtube_enabled && playerSettings.bandcamp_enabled && (
           <Box sx={{ px: 2, pt: 2 }}>
             <Stack direction="row" spacing={1} justifyContent="center">
               <Button
                 variant={platformPreference === 'bandcamp' ? 'contained' : 'outlined'}
                 size="small"
                 onClick={() => handlePlatformChange('bandcamp')}
-                disabled={!currentItem.platforms.bandcamp}
+                disabled={!currentItem.platforms.bandcamp || !playerSettings.bandcamp_enabled}
               >
                 Bandcamp
               </Button>
@@ -267,7 +295,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                 variant={platformPreference === 'youtube' ? 'contained' : 'outlined'}
                 size="small"
                 onClick={() => handlePlatformChange('youtube')}
-                disabled={!currentItem.platforms.youtube}
+                disabled={!currentItem.platforms.youtube || !playerSettings.youtube_enabled}
               >
                 YouTube
               </Button>
@@ -277,7 +305,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
 
         {/* Embed Players */}
         <Box sx={{ px: 2, py: 2 }}>
-          {currentItem.platforms.youtube && playerState.currentPlatform === 'youtube' && (
+          {currentItem.platforms.youtube && playerState.currentPlatform === 'youtube' && playerSettings.youtube_enabled && (
             <Box sx={{ width: '100%', mb: 2 }}>
               {/* Custom YouTube Player using yt-dlp - No embed restrictions! */}
               <YouTubePlayer
@@ -285,6 +313,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                 albumTitle={currentItem.title}
                 artist={currentItem.artist}
                 onAlbumEnd={handleAlbumEnd}
+                hasUserInteractedRef={hasUserInteractedRef}
               />
               
               {/* Fallback link */}
@@ -303,7 +332,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
             </Box>
           )}
 
-          {currentItem.platforms.bandcamp && playerState.currentPlatform === 'bandcamp' && (
+          {currentItem.platforms.bandcamp && playerState.currentPlatform === 'bandcamp' && playerSettings.bandcamp_enabled && (
             <Box sx={{ width: '100%', mb: 2 }}>
               {/* Custom Bandcamp Player - No cookie popups! */}
               <BandcampPlayer
@@ -311,6 +340,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                 albumTitle={currentItem.title}
                 artist={currentItem.artist}
                 onAlbumEnd={handleAlbumEnd}
+                hasUserInteractedRef={hasUserInteractedRef}
               />
               
               {/* Fallback link */}
@@ -357,12 +387,6 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
               Next Album
             </Button>
           </Stack>
-          
-          <LinearProgress 
-            variant="determinate" 
-            value={(playerState.currentIndex / playlist.length) * 100} 
-            sx={{ mt: 2, borderRadius: 1 }}
-          />
         </Box>
 
         {/* Platform Toggle (if both available) */}
