@@ -65,6 +65,23 @@ const EnhancedAlbumDisplay: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   
+  // Fetch player settings to determine if play button should be shown
+  useEffect(() => {
+    const fetchPlayerSettings = async () => {
+      try {
+        const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+        const response = await fetch(`${baseUrl}/api/admin/settings/player`);
+        if (response.ok) {
+          const settings = await response.json();
+          setPlayerSettings(settings);
+        }
+      } catch (error) {
+        console.error('Failed to fetch player settings:', error);
+      }
+    };
+    fetchPlayerSettings();
+  }, []);
+  
   const [albums, setAlbums] = useState<AlbumWithGenres[]>([]);
   const [filteredAlbums, setFilteredAlbums] = useState<AlbumWithGenres[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +97,7 @@ const EnhancedAlbumDisplay: React.FC = () => {
   const [totalAlbums, setTotalAlbums] = useState(0);
   const [periodInfo, setPeriodInfo] = useState<{ start_date: string; end_date: string } | null>(null);
   const { playlist, isPlayerOpen, loading: playlistLoading, error: playlistError, loadPlaylist, closePlayer } = usePlaylist();
+  const [playerSettings, setPlayerSettings] = useState({ bandcamp_enabled: true, youtube_enabled: true });
   const [imageDialog, setImageDialog] = useState<{
     open: boolean;
     imageUrl: string;
@@ -340,8 +358,8 @@ const EnhancedAlbumDisplay: React.FC = () => {
           </Button>
           
           <Box display="flex" gap={2} flexWrap="wrap">
-            {/* Play All Button */}
-            {(periodType || date) && (
+            {/* Play All Button - only show if at least one player service is enabled */}
+            {(periodType || date) && (playerSettings.bandcamp_enabled || playerSettings.youtube_enabled) && (
               <PlaylistButton
                 periodType={(periodType as 'day' | 'week' | 'month') || 'day'}
                 periodKey={periodKey || date || ''}
