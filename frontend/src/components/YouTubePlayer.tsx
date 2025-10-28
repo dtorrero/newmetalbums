@@ -56,6 +56,13 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   const hasUserInteractedRef = externalHasUserInteractedRef || internalHasUserInteractedRef;
   
   const audioRef = useRef<HTMLAudioElement>(null);
+  const isPlayingRef = useRef(isPlaying); // Keep ref in sync for event handlers
+  const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Fetch stream URLs from backend
   useEffect(() => {
@@ -64,10 +71,17 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
         setLoading(true);
         setError(null);
         setCurrentTrackIndex(0);
-        setIsPlaying(false);
+        
+        // Preserve play state from parent's ref (shared across albums)
+        if (externalHasUserInteractedRef?.current) {
+          console.log('🎬 [YOUTUBE] User was playing, preserving play state');
+          setIsPlaying(true);
+        } else {
+          setIsPlaying(false);
+        }
+        
         setCurrentTime(0);
         setDuration(0);
-        // Don't reset hasUserStartedPlaybackRef - preserve across albums
         
         // Convert embed URL to watch URL if needed
         let urlToFetch = youtubeUrl;
@@ -160,7 +174,18 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     };
 
     fetchStream();
-  }, [youtubeUrl]);
+    
+    // Cleanup: stop audio when album changes or component unmounts
+    return () => {
+      const audio = audioRef.current;
+      if (audio) {
+        console.log('🎬 [YOUTUBE] Cleaning up old album audio');
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      }
+    };
+  }, [youtubeUrl, externalHasUserInteractedRef]);
 
   const handleNext = () => {
     if (currentTrackIndex < tracks.length - 1) {
@@ -273,40 +298,66 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
             .catch(err => console.log('Could not check download size:', err));
         }
         
-        // Simple approach: load and auto-play when ready (if user has interacted)
-        const handleCanPlay = () => {
-          console.log('🎬 [YOUTUBE] Track ready');
+        // Use loadeddata event for more reliable autoplay
+        const handleLoadedData = () => {
+          console.log('🎬 [YOUTUBE] Track data loaded | isPlayingRef:', isPlayingRef.current);
           setTrackLoading(false);
           setDownloadNotification(null); // Clear notification when ready
           
-          // Only auto-play if user has clicked play before (browser autoplay policy)
-          if (hasUserInteractedRef.current) {
-            console.log('🎬 [YOUTUBE] Auto-playing...');
+          // Cancel fallback timer since loadeddata fired
+          if (fallbackTimerRef.current) {
+            console.log('🎬 [YOUTUBE] Canceling fallback timer (loadeddata fired)');
+            clearTimeout(fallbackTimerRef.current);
+            fallbackTimerRef.current = null;
+          }
+          
+          // Auto-play if we should be playing (using ref for stable value)
+          if (isPlayingRef.current) {
+            console.log('🎬 [YOUTUBE] Attempting auto-play...');
             audio.play()
               .then(() => {
-                console.log('🎬 [YOUTUBE] ✅ Playing');
+                console.log('🎬 [YOUTUBE] ✅ Auto-play successful');
                 setIsPlaying(true);
               })
               .catch(err => {
-                console.error('🎬 [YOUTUBE] ❌ Play failed:', err);
+                console.error('🎬 [YOUTUBE] ❌ Auto-play failed:', err);
                 setIsPlaying(false);
               });
           } else {
-            console.log('🎬 [YOUTUBE] Waiting for user to click play (first album)');
+            console.log('🎬 [YOUTUBE] ⏸️ Not auto-playing (isPlaying is false)');
           }
           
           // Remove listener after first use
-          audio.removeEventListener('canplaythrough', handleCanPlay);
+          audio.removeEventListener('loadeddata', handleLoadedData);
         };
         
-        audio.addEventListener('canplaythrough', handleCanPlay);
+        audio.addEventListener('loadeddata', handleLoadedData);
         audio.src = track.stream_url;
         audio.load();
         console.log('🎬 [YOUTUBE] Audio element src set, calling load()');
         
+        // Fallback: if loadeddata doesn't fire, try to play after a short delay
+        if (isPlayingRef.current) {
+          fallbackTimerRef.current = setTimeout(() => {
+            console.log('🎬 [YOUTUBE] Fallback: loadeddata timeout, attempting play...');
+            if (audio.readyState >= 2) { // HAVE_CURRENT_DATA or better
+              setTrackLoading(false);
+              audio.play().catch(err => {
+                console.error('🎬 [YOUTUBE] Fallback play failed:', err);
+                setIsPlaying(false);
+              });
+            }
+            fallbackTimerRef.current = null;
+          }, 3000); // 3 seconds for YouTube (larger files)
+        }
+        
         // Cleanup
         return () => {
-          audio.removeEventListener('canplaythrough', handleCanPlay);
+          audio.removeEventListener('loadeddata', handleLoadedData);
+          if (fallbackTimerRef.current) {
+            clearTimeout(fallbackTimerRef.current);
+            fallbackTimerRef.current = null;
+          }
         };
       } else {
         console.error('🎬 [YOUTUBE] ❌ No stream URL available for track');
@@ -321,14 +372,20 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
       console.log('🎬 [YOUTUBE] Pausing');
       audioRef.current.pause();
       setIsPlaying(false);
+      if (externalHasUserInteractedRef) {
+        externalHasUserInteractedRef.current = false;
+      }
     } else {
       console.log('🎬 [YOUTUBE] User clicked play');
-      hasUserInteractedRef.current = true;  // Mark that user has interacted
+      setIsPlaying(true);
+      // Mark that user has started playback (for parent to track)
+      if (externalHasUserInteractedRef) {
+        externalHasUserInteractedRef.current = true;
+      }
       setTrackLoading(true);
       try {
         await audioRef.current.play();
         console.log('🎬 [YOUTUBE] ✅ Playing');
-        setIsPlaying(true);
         setTrackLoading(false);
       } catch (err) {
         console.error('🎬 [YOUTUBE] ❌ Play error:', err);
