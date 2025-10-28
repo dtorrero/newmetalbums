@@ -1328,17 +1328,34 @@ async def get_youtube_stream(url: str):
         logger.error(f"🎬 [YOUTUBE/YT-DLP] ========== END (ERROR) ==========")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Simple cache for Bandcamp track data to avoid rate limiting
+bandcamp_tracks_cache = {}
+BANDCAMP_CACHE_TTL = 3600  # 1 hour
+
 @app.get("/api/bandcamp/tracks")
 async def get_bandcamp_tracks(url: str):
     """
     Extract track URLs from a Bandcamp album page.
     Returns direct MP3 URLs for playback without cookie popups.
+    Cached for 1 hour to avoid rate limiting.
     """
     try:
         from playwright.async_api import async_playwright
         from platform_verifier import PlatformVerifier
+        import time
         
-        logger.info(f"🎵 Extracting Bandcamp tracks from: {url}")
+        # Check cache first
+        cache_key = url
+        if cache_key in bandcamp_tracks_cache:
+            cached_data, cached_time = bandcamp_tracks_cache[cache_key]
+            if time.time() - cached_time < BANDCAMP_CACHE_TTL:
+                logger.info(f"🎵 [CACHE HIT] Returning cached tracks for: {url}")
+                return cached_data
+            else:
+                logger.info(f"🎵 [CACHE EXPIRED] Re-fetching tracks for: {url}")
+                del bandcamp_tracks_cache[cache_key]
+        
+        logger.info(f"🎵 [CACHE MISS] Extracting Bandcamp tracks from: {url}")
         
         # Launch browser and extract tracks
         async with async_playwright() as p:
@@ -1361,7 +1378,10 @@ async def get_bandcamp_tracks(url: str):
             logger.error(f"❌ Track extraction failed: {error_msg}")
             raise HTTPException(status_code=404, detail=error_msg)
         
-        logger.info(f"✓ Successfully extracted {len(track_data['tracks'])} tracks")
+        # Cache the successful result
+        bandcamp_tracks_cache[cache_key] = (track_data, time.time())
+        logger.info(f"✓ Successfully extracted and cached {len(track_data['tracks'])} tracks")
+        
         return track_data
         
     except HTTPException:

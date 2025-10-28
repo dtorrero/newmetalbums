@@ -52,10 +52,12 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const isPlayingRef = useRef(isPlaying); // Keep ref in sync for event handlers
+  const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Keep ref in sync with state
   useEffect(() => {
     isPlayingRef.current = isPlaying;
+    console.log('🎵 isPlaying state changed:', isPlaying);
   }, [isPlaying]);
 
   // Fetch tracks from backend
@@ -65,10 +67,15 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
         setLoading(true);
         setError(null);
         setCurrentTrackIndex(0);  // Reset to first track when album changes
-        // Don't reset isPlaying - preserve play state across albums
+        
+        // Preserve play state from parent's ref (shared across albums)
+        if (externalHasUserInteractedRef?.current) {
+          console.log('🎵 User was playing, preserving play state');
+          setIsPlaying(true);
+        }
+        
         setCurrentTime(0);
         setDuration(0);
-        // Don't reset hasUserStartedPlaybackRef - preserve across albums
         const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
         const response = await fetch(
           `${baseUrl}/api/bandcamp/tracks?url=${encodeURIComponent(bandcampUrl)}`
@@ -80,11 +87,11 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
         
         const data = await response.json();
         
-        if (data.found && data.tracks && data.tracks.length > 0) {
-          setTracks(data.tracks);
-        } else {
-          setError('No playable tracks found');
+        if (!data.tracks || data.tracks.length === 0) {
+          throw new Error('No tracks found');
         }
+        
+        setTracks(data.tracks);
       } catch (err) {
         console.error('Error fetching Bandcamp tracks:', err);
         setError('Could not load tracks. Please try opening in Bandcamp.');
@@ -94,6 +101,20 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     };
 
     fetchTracks();
+    
+    // Cleanup: stop audio when album changes or component unmounts
+    return () => {
+      // Capture the current audio element at cleanup time
+      const audio = audioRef.current;
+      if (audio) {
+        console.log('🎵 Cleaning up old album audio');
+        // Pause first
+        audio.pause();
+        // Remove src to stop loading - this will trigger an error event but we ignore it
+        audio.removeAttribute('src');
+        audio.load();
+      }
+    };
   }, [bandcampUrl]);
 
   const handleNext = useCallback(() => {
@@ -145,15 +166,29 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     };
     
     const handleLoadedData = () => {
-      console.log('🎵 Track data loaded');
+      console.log('🎵 Track data loaded | isPlayingRef:', isPlayingRef.current);
       setTrackLoading(false);
+      
+      // Cancel fallback timer since loadeddata fired
+      if (fallbackTimerRef.current) {
+        console.log('🎵 Canceling fallback timer (loadeddata fired)');
+        clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
+      
       // Auto-play if we should be playing
       if (isPlayingRef.current) {
-        console.log('🎵 Auto-playing...');
-        audio.play().catch(err => {
-          console.error('Auto-play failed:', err);
-          setIsPlaying(false);
-        });
+        console.log('🎵 Attempting auto-play...');
+        audio.play()
+          .then(() => {
+            console.log('✅ Auto-play successful');
+          })
+          .catch(err => {
+            console.error('❌ Auto-play failed:', err);
+            setIsPlaying(false);
+          });
+      } else {
+        console.log('⏸️ Not auto-playing (isPlaying is false)');
       }
     };
     
@@ -169,8 +204,9 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     
     const handleError = (e: Event) => {
       console.error('🎵 Audio error:', e);
+      // Don't reset isPlaying - error might be from cleanup or network issue
+      // User can manually pause if needed
       setTrackLoading(false);
-      setIsPlaying(false);
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
@@ -214,7 +250,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
         
         // Fallback: if loadeddata doesn't fire, try to play after a short delay
         if (isPlaying) {
-          const fallbackTimer = setTimeout(() => {
+          fallbackTimerRef.current = setTimeout(() => {
             console.log('🎵 Fallback: loadeddata timeout, attempting play...');
             if (audio.readyState >= 2) { // HAVE_CURRENT_DATA or better
               setTrackLoading(false);
@@ -223,13 +259,26 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
                 setIsPlaying(false);
               });
             }
+            fallbackTimerRef.current = null;
           }, 2000);
           
-          return () => clearTimeout(fallbackTimer);
+          return () => {
+            if (fallbackTimerRef.current) {
+              clearTimeout(fallbackTimerRef.current);
+              fallbackTimerRef.current = null;
+            }
+          };
         }
+      } else {
+        // No valid track - clear loading state
+        console.warn('⚠️ No valid track to load');
+        setTrackLoading(false);
       }
+    } else if (tracks.length === 0 && !loading) {
+      // No tracks available and not loading - clear loading state
+      setTrackLoading(false);
     }
-  }, [currentTrackIndex, tracks, isPlaying]);
+  }, [currentTrackIndex, tracks, isPlaying, loading]);
 
   const handlePlayPause = async () => {
     if (!audioRef.current) return;
@@ -238,9 +287,16 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
       // Pause
       audioRef.current.pause();
       setIsPlaying(false);
+      if (externalHasUserInteractedRef) {
+        externalHasUserInteractedRef.current = false;
+      }
     } else {
       // Play
       setIsPlaying(true);
+      // Mark that user has started playback (for parent to track)
+      if (externalHasUserInteractedRef) {
+        externalHasUserInteractedRef.current = true;
+      }
       try {
         await audioRef.current.play();
       } catch (err) {
