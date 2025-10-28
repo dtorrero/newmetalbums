@@ -102,40 +102,29 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     fetchPlayerSettings();
   }, []);
 
-  // Determine which platform to show based on user preference AND admin settings
+  // Determine which platform to show - ALWAYS prioritize Bandcamp over YouTube
   useEffect(() => {
     if (!currentItem || !settingsLoaded) return;
 
-    // Try user's preferred platform first, fallback to the other
-    // BUT respect admin settings - only use enabled services
+    // Priority: Bandcamp first (if available and enabled), then YouTube (if enabled)
+    // This ensures better quality and no restrictions
     let selectedPlatform: 'youtube' | 'bandcamp' | null = null;
     
     console.log('Selecting platform with settings:', playerSettings);
     
-    if (platformPreference === 'bandcamp') {
-      if (currentItem.platforms.bandcamp && playerSettings.bandcamp_enabled) {
-        selectedPlatform = 'bandcamp';
-        console.log('Selected Bandcamp (preferred)');
-      } else if (currentItem.platforms.youtube && playerSettings.youtube_enabled) {
-        selectedPlatform = 'youtube';
-        console.log('Selected YouTube (fallback)');
-      } else {
-        console.log('No enabled platform available');
-      }
+    // ALWAYS try Bandcamp first
+    if (currentItem.platforms.bandcamp && playerSettings.bandcamp_enabled) {
+      selectedPlatform = 'bandcamp';
+      console.log('Selected Bandcamp (priority)');
+    } else if (currentItem.platforms.youtube && playerSettings.youtube_enabled) {
+      selectedPlatform = 'youtube';
+      console.log('Selected YouTube (fallback - no Bandcamp available)');
     } else {
-      if (currentItem.platforms.youtube && playerSettings.youtube_enabled) {
-        selectedPlatform = 'youtube';
-        console.log('Selected YouTube (preferred)');
-      } else if (currentItem.platforms.bandcamp && playerSettings.bandcamp_enabled) {
-        selectedPlatform = 'bandcamp';
-        console.log('Selected Bandcamp (fallback)');
-      } else {
-        console.log('No enabled platform available');
-      }
+      console.log('No enabled platform available');
     }
 
     setPlayerState(prev => ({ ...prev, currentPlatform: selectedPlatform, isPlaying: false }));
-  }, [currentItem, platformPreference, playerSettings, settingsLoaded]);
+  }, [currentItem, playerSettings, settingsLoaded]);
   
   // Auto-play YouTube when play button is clicked
   useEffect(() => {
