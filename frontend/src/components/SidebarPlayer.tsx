@@ -13,6 +13,8 @@ import {
   CardContent,
   Divider,
   Button,
+  useTheme,
+  useMediaQuery,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -44,6 +46,9 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
   playlist,
   initialIndex = 0,
 }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  
   const [playerState, setPlayerState] = useState<PlayerState>({
     isPlaying: false,
     currentIndex: initialIndex,
@@ -207,12 +212,12 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
       anchor="right"
       open={open}
       onClose={onClose}
-      variant="persistent"
+      variant={isMobile ? 'temporary' : 'persistent'}
       sx={{
-        width: SIDEBAR_WIDTH,
+        width: isMobile ? '100vw' : SIDEBAR_WIDTH,
         flexShrink: 0,
         '& .MuiDrawer-paper': {
-          width: SIDEBAR_WIDTH,
+          width: isMobile ? '100vw' : SIDEBAR_WIDTH,
           boxSizing: 'border-box',
           bgcolor: 'background.paper',
           borderLeft: '1px solid',
@@ -222,9 +227,9 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     >
       <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
-        <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <MusicNote /> Now Playing
+        <Box sx={{ p: isMobile ? 1.5 : 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant={isMobile ? 'subtitle1' : 'h6'} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <MusicNote fontSize={isMobile ? 'small' : 'medium'} /> Now Playing
           </Typography>
           <IconButton onClick={onClose} size="small">
             <Close />
@@ -240,22 +245,22 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
               component="img"
               sx={{ 
                 width: '100%',
-                height: '300px',
+                height: isMobile ? '250px' : '300px',
                 objectFit: 'cover'
               }}
-              image={currentItem.cover_path ? `http://127.0.0.1:8000/${currentItem.cover_path}` : currentItem.cover_art}
+              image={currentItem.cover_path ? `${process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000'}/${currentItem.cover_path}` : currentItem.cover_art}
               alt={currentItem.title}
             />
           ) : (
             <Box sx={{ 
               width: '100%', 
-              height: '300px', 
+              height: isMobile ? '250px' : '300px', 
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center',
               bgcolor: 'grey.900'
             }}>
-              <MusicNote sx={{ fontSize: 80, color: 'grey.700' }} />
+              <MusicNote sx={{ fontSize: isMobile ? 60 : 80, color: 'grey.700' }} />
             </Box>
           )}
           
@@ -267,13 +272,13 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
               left: 0,
               right: 0,
               background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 70%, transparent 100%)',
-              p: 2,
+              p: isMobile ? 1.5 : 2,
             }}
           >
-            <Typography variant="h6" sx={{ color: 'white', fontWeight: 'bold' }} noWrap>
+            <Typography variant={isMobile ? 'subtitle1' : 'h6'} sx={{ color: 'white', fontWeight: 'bold' }} noWrap>
               {currentItem.title}
             </Typography>
-            <Typography variant="body2" sx={{ color: 'grey.300' }} noWrap>
+            <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ color: 'grey.300' }} noWrap>
               {currentItem.artist}
             </Typography>
             <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
@@ -372,31 +377,57 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
         </Box>
 
         {/* Album Navigation Controls */}
-        <Box sx={{ p: 2, bgcolor: 'background.default' }}>
+        <Box sx={{ p: isMobile ? 1.5 : 2, bgcolor: 'background.default' }}>
           <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{ mb: 1 }}>
             Album {playerState.currentIndex + 1} of {playlist.length}
           </Typography>
           
-          <Stack direction="row" spacing={2} justifyContent="center" alignItems="center">
-            <Button
-              variant="outlined"
-              startIcon={<SkipPrevious />}
-              onClick={handlePrevious}
-              disabled={playlist.length <= 1}
-              size="large"
-            >
-              Previous Album
-            </Button>
-            
-            <Button
-              variant="outlined"
-              endIcon={<SkipNext />}
-              onClick={handleNext}
-              disabled={playlist.length <= 1}
-              size="large"
-            >
-              Next Album
-            </Button>
+          <Stack direction="row" spacing={isMobile ? 1 : 2} justifyContent="center" alignItems="center">
+            {isMobile ? (
+              <>
+                <IconButton
+                  color="primary"
+                  onClick={handlePrevious}
+                  disabled={playlist.length <= 1}
+                  size="large"
+                  sx={{ border: '1px solid', borderColor: 'primary.main' }}
+                >
+                  <SkipPrevious />
+                </IconButton>
+                
+                <IconButton
+                  color="primary"
+                  onClick={handleNext}
+                  disabled={playlist.length <= 1}
+                  size="large"
+                  sx={{ border: '1px solid', borderColor: 'primary.main' }}
+                >
+                  <SkipNext />
+                </IconButton>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="outlined"
+                  startIcon={<SkipPrevious />}
+                  onClick={handlePrevious}
+                  disabled={playlist.length <= 1}
+                  size="large"
+                >
+                  Previous Album
+                </Button>
+                
+                <Button
+                  variant="outlined"
+                  endIcon={<SkipNext />}
+                  onClick={handleNext}
+                  disabled={playlist.length <= 1}
+                  size="large"
+                >
+                  Next Album
+                </Button>
+              </>
+            )}
           </Stack>
         </Box>
 
