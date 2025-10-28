@@ -278,7 +278,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
       // No tracks available and not loading - clear loading state
       setTrackLoading(false);
     }
-  }, [currentTrackIndex, tracks, isPlaying, loading]);
+  }, [currentTrackIndex, tracks, loading]);
 
   const handlePlayPause = async () => {
     if (!audioRef.current) return;
