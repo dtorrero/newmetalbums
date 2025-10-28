@@ -1607,8 +1607,8 @@ async def update_cache_settings(settings: dict, token: str = Depends(verify_admi
 
 # Player Settings endpoints
 @app.get("/api/admin/settings/player")
-async def get_player_settings(token: str = Depends(verify_admin_token)):
-    """Get player service settings"""
+async def get_player_settings():
+    """Get player service settings (public endpoint)"""
     try:
         bandcamp_enabled = db.get_setting('player_bandcamp_enabled')
         youtube_enabled = db.get_setting('player_youtube_enabled')
@@ -1618,6 +1618,8 @@ async def get_player_settings(token: str = Depends(verify_admin_token)):
             bandcamp_enabled = True
         if youtube_enabled is None:
             youtube_enabled = True
+        
+        logger.info(f"📖 [PLAYER] Settings requested - Bandcamp: {bandcamp_enabled}, YouTube: {youtube_enabled}")
         
         return {
             "bandcamp_enabled": bool(bandcamp_enabled),
@@ -2016,6 +2018,18 @@ async def get_dynamic_playlist(
         else:
             raise HTTPException(status_code=400, detail="Invalid period_type. Must be day, week, or month")
         
+        # Get player settings to filter by enabled platforms
+        bandcamp_enabled = db.get_setting('player_bandcamp_enabled')
+        youtube_enabled = db.get_setting('player_youtube_enabled')
+        
+        # Default to True if not set
+        if bandcamp_enabled is None:
+            bandcamp_enabled = True
+        if youtube_enabled is None:
+            youtube_enabled = True
+        
+        logger.info(f"   Player settings: Bandcamp={bandcamp_enabled}, YouTube={youtube_enabled}")
+        
         # Shuffle if requested
         if shuffle:
             import random
@@ -2023,6 +2037,7 @@ async def get_dynamic_playlist(
         
         # Transform to playable format
         playlist_items = []
+        skipped_albums = 0
         for album in albums:
             item = {
                 'album_id': album['album_id'],
@@ -2036,8 +2051,8 @@ async def get_dynamic_playlist(
                 'platforms': {}
             }
             
-            # Add YouTube embed if available
-            if album.get('youtube_embed_url'):
+            # Add YouTube embed if available AND enabled
+            if album.get('youtube_embed_url') and youtube_enabled:
                 item['platforms']['youtube'] = {
                     'embed_url': album['youtube_embed_url'],
                     'verified_title': album.get('youtube_verified_title'),
@@ -2045,17 +2060,22 @@ async def get_dynamic_playlist(
                     'embed_type': album.get('youtube_embed_type', 'video')
                 }
             
-            # Add Bandcamp embed if available
-            if album.get('bandcamp_embed_url'):
+            # Add Bandcamp embed if available AND enabled
+            if album.get('bandcamp_embed_url') and bandcamp_enabled:
                 item['platforms']['bandcamp'] = {
                     'embed_url': album['bandcamp_embed_url'],
                     'verified_title': album.get('bandcamp_verified_title'),
                     'verification_score': album.get('bandcamp_verification_score')
                 }
             
-            # Only include if at least one platform is available
+            # Only include if at least one ENABLED platform is available
             if item['platforms']:
                 playlist_items.append(item)
+            else:
+                skipped_albums += 1
+        
+        if skipped_albums > 0:
+            logger.info(f"   ⏭️  Skipped {skipped_albums} albums (no enabled platforms available)")
         
         logger.info(f"   ✓ Returning {len(playlist_items)} playable items out of {len(albums)} total albums")
         

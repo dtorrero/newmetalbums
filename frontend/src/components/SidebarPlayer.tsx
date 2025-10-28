@@ -64,6 +64,7 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     bandcamp_enabled: true,
     youtube_enabled: true,
   });
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   
   // Shared user interaction state - passed to both players
   const hasUserInteractedRef = useRef(false);
@@ -78,13 +79,24 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     const fetchPlayerSettings = async () => {
       try {
         const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000';
+        console.log('🔧 Fetching player settings from:', `${baseUrl}/api/admin/settings/player`);
         const response = await fetch(`${baseUrl}/api/admin/settings/player`);
+        console.log('🔧 Response status:', response.status);
         if (response.ok) {
           const data = await response.json();
+          console.log('✅ Player settings loaded:', data);
           setPlayerSettings(data);
+          setSettingsLoaded(true);
+        } else {
+          const errorText = await response.text();
+          console.error('❌ Failed to fetch player settings. Status:', response.status, 'Error:', errorText);
+          console.warn('⚠️ Using default settings (both enabled)');
+          setSettingsLoaded(true);
         }
       } catch (error) {
-        console.error('Failed to fetch player settings:', error);
+        console.error('❌ Exception fetching player settings:', error);
+        console.warn('⚠️ Using default settings (both enabled)');
+        setSettingsLoaded(true);
       }
     };
     fetchPlayerSettings();
@@ -92,28 +104,38 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
 
   // Determine which platform to show based on user preference AND admin settings
   useEffect(() => {
-    if (!currentItem) return;
+    if (!currentItem || !settingsLoaded) return;
 
     // Try user's preferred platform first, fallback to the other
     // BUT respect admin settings - only use enabled services
     let selectedPlatform: 'youtube' | 'bandcamp' | null = null;
     
+    console.log('Selecting platform with settings:', playerSettings);
+    
     if (platformPreference === 'bandcamp') {
       if (currentItem.platforms.bandcamp && playerSettings.bandcamp_enabled) {
         selectedPlatform = 'bandcamp';
+        console.log('Selected Bandcamp (preferred)');
       } else if (currentItem.platforms.youtube && playerSettings.youtube_enabled) {
         selectedPlatform = 'youtube';
+        console.log('Selected YouTube (fallback)');
+      } else {
+        console.log('No enabled platform available');
       }
     } else {
       if (currentItem.platforms.youtube && playerSettings.youtube_enabled) {
         selectedPlatform = 'youtube';
+        console.log('Selected YouTube (preferred)');
       } else if (currentItem.platforms.bandcamp && playerSettings.bandcamp_enabled) {
         selectedPlatform = 'bandcamp';
+        console.log('Selected Bandcamp (fallback)');
+      } else {
+        console.log('No enabled platform available');
       }
     }
 
     setPlayerState(prev => ({ ...prev, currentPlatform: selectedPlatform, isPlaying: false }));
-  }, [currentItem, platformPreference, playerSettings]);
+  }, [currentItem, platformPreference, playerSettings, settingsLoaded]);
   
   // Auto-play YouTube when play button is clicked
   useEffect(() => {

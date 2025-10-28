@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Typography,
   IconButton,
-  Slider,
   List,
   ListItem,
   ListItemButton,
@@ -50,11 +49,14 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [trackLoading, setTrackLoading] = useState(false);
-  const internalHasUserInteractedRef = useRef(false);  // Local fallback
-  // Use external ref if provided, otherwise use internal
-  const hasUserInteractedRef = externalHasUserInteractedRef || internalHasUserInteractedRef;
 
   const audioRef = useRef<HTMLAudioElement>(null);
+  const isPlayingRef = useRef(isPlaying); // Keep ref in sync for event handlers
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Fetch tracks from backend
   useEffect(() => {
@@ -63,7 +65,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
         setLoading(true);
         setError(null);
         setCurrentTrackIndex(0);  // Reset to first track when album changes
-        setIsPlaying(false);  // Reset play state
+        // Don't reset isPlaying - preserve play state across albums
         setCurrentTime(0);
         setDuration(0);
         // Don't reset hasUserStartedPlaybackRef - preserve across albums
@@ -94,24 +96,27 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     fetchTracks();
   }, [bandcampUrl]);
 
-  const handleNext = (autoAdvance = false) => {
-    if (currentTrackIndex < tracks.length - 1) {
-      // If auto-advancing (track ended), mark that we should auto-play next track
-      if (autoAdvance && !hasUserInteractedRef.current) {
-        hasUserInteractedRef.current = true;
-      }
-      setCurrentTrackIndex(currentTrackIndex + 1);
-    } else {
-      // Last track finished - notify parent to go to next album
-      if (onAlbumEnd) {
-        onAlbumEnd();
+  const handleNext = useCallback(() => {
+    setCurrentTrackIndex(prev => {
+      if (prev < tracks.length - 1) {
+        // Go to next track
+        return prev + 1;
       } else {
-        setCurrentTrackIndex(0); // Fallback: loop back to start
+        // Last track - notify parent to go to next album
+        // Defer to avoid updating parent during render
+        if (onAlbumEnd) {
+          setTimeout(() => {
+            console.log('🎵 Album finished, calling onAlbumEnd');
+            onAlbumEnd();
+          }, 0);
+        }
+        // Don't change track index - parent will load new album
+        return prev;
       }
-    }
-  };
+    });
+  }, [tracks.length, onAlbumEnd]);
 
-  // Audio event handlers
+  // Audio event handlers - set up once, never remove
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -119,127 +124,128 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
     const handleTimeUpdate = () => {
       setCurrentTime(audio.currentTime);
     };
+    
     const handleDurationChange = () => {
       const newDuration = audio.duration;
       if (!isNaN(newDuration) && isFinite(newDuration)) {
-        console.log('Duration loaded:', newDuration);
         setDuration(newDuration);
       }
     };
+    
     const handleLoadedMetadata = () => {
       const newDuration = audio.duration;
       if (!isNaN(newDuration) && isFinite(newDuration)) {
-        console.log('Metadata loaded, duration:', newDuration);
         setDuration(newDuration);
       }
     };
+    
     const handleEnded = () => {
-      console.log('Track ended, moving to next');
-      handleNext(true); // Pass true to indicate auto-advance
+      console.log('🎵 Track ended, advancing...');
+      handleNext();
     };
-    const handlePlay = () => {
-      console.log('Audio play event fired');
-      setIsPlaying(true);
+    
+    const handleLoadedData = () => {
+      console.log('🎵 Track data loaded');
+      setTrackLoading(false);
+      // Auto-play if we should be playing
+      if (isPlayingRef.current) {
+        console.log('🎵 Auto-playing...');
+        audio.play().catch(err => {
+          console.error('Auto-play failed:', err);
+          setIsPlaying(false);
+        });
+      }
     };
-    const handlePause = () => {
-      console.log('Audio pause event fired');
-      setIsPlaying(false);
+    
+    const handlePlaying = () => {
+      console.log('🎵 Playing');
+      setTrackLoading(false);
     };
-    const handleCanPlayThrough = () => {
-      setTrackLoading(false);  // Track is ready
-      console.log('Track ready to play');
-    };
+    
     const handleWaiting = () => {
-      setTrackLoading(true);  // Buffering
+      console.log('🎵 Buffering...');
+      setTrackLoading(true);
+    };
+    
+    const handleError = (e: Event) => {
+      console.error('🎵 Audio error:', e);
+      setTrackLoading(false);
+      setIsPlaying(false);
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('loadeddata', handleLoadedData);
+    audio.addEventListener('playing', handlePlaying);
     audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('play', handlePlay);
-    audio.addEventListener('pause', handlePause);
-    audio.addEventListener('canplaythrough', handleCanPlayThrough);
     audio.addEventListener('waiting', handleWaiting);
+    audio.addEventListener('error', handleError);
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('durationchange', handleDurationChange);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('loadeddata', handleLoadedData);
+      audio.removeEventListener('playing', handlePlaying);
       audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('play', handlePlay);
-      audio.removeEventListener('pause', handlePause);
-      audio.removeEventListener('canplaythrough', handleCanPlayThrough);
       audio.removeEventListener('waiting', handleWaiting);
+      audio.removeEventListener('error', handleError);
     };
-  }, [currentTrackIndex, tracks.length]);
+  }, [handleNext]);
 
-  // Load track when index changes - SIMPLIFIED
+  // Load track when index changes
   useEffect(() => {
     if (tracks.length > 0 && audioRef.current) {
       const track = tracks[currentTrackIndex];
       if (track && track.file_mp3) {
-        console.log('🎵 [BANDCAMP] Loading track:', track.title);
-        setTrackLoading(true);
+        console.log('🎵 Loading track:', track.title, '| isPlaying:', isPlaying);
         const audio = audioRef.current;
         
-        // Simple approach: load and auto-play when ready (if user has interacted)
-        const handleCanPlay = () => {
-          console.log('🎵 [BANDCAMP] Track ready');
-          setTrackLoading(false);
-          
-          // Only auto-play if user has clicked play before (browser autoplay policy)
-          if (hasUserInteractedRef.current) {
-            console.log('🎵 [BANDCAMP] Auto-playing...');
-            audio.play()
-              .then(() => {
-                console.log('🎵 [BANDCAMP] ✅ Playing');
-                setIsPlaying(true);
-              })
-              .catch(err => {
-                console.error('🎵 [BANDCAMP] ❌ Play failed:', err);
-                setIsPlaying(false);
-              });
-          } else {
-            console.log('🎵 [BANDCAMP] Waiting for user to click play (first album)');
-          }
-          
-          // Remove listener after first use
-          audio.removeEventListener('canplaythrough', handleCanPlay);
-        };
+        // Reset state for new track
+        setCurrentTime(0);
+        setDuration(0);
+        setTrackLoading(true);
         
-        audio.addEventListener('canplaythrough', handleCanPlay);
+        // Load the new track
         audio.src = track.file_mp3;
         audio.load();
+        console.log('🎵 Track load initiated, waiting for loadeddata event...');
         
-        // Cleanup
-        return () => {
-          audio.removeEventListener('canplaythrough', handleCanPlay);
-        };
+        // Fallback: if loadeddata doesn't fire, try to play after a short delay
+        if (isPlaying) {
+          const fallbackTimer = setTimeout(() => {
+            console.log('🎵 Fallback: loadeddata timeout, attempting play...');
+            if (audio.readyState >= 2) { // HAVE_CURRENT_DATA or better
+              setTrackLoading(false);
+              audio.play().catch(err => {
+                console.error('Fallback play failed:', err);
+                setIsPlaying(false);
+              });
+            }
+          }, 2000);
+          
+          return () => clearTimeout(fallbackTimer);
+        }
       }
     }
-  }, [currentTrackIndex, tracks]);
+  }, [currentTrackIndex, tracks, isPlaying]);
 
   const handlePlayPause = async () => {
     if (!audioRef.current) return;
     
     if (isPlaying) {
-      console.log('🎵 [BANDCAMP] Pausing');
+      // Pause
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      console.log('🎵 [BANDCAMP] User clicked play');
-      hasUserInteractedRef.current = true;  // Mark that user has interacted
-      setTrackLoading(true);
+      // Play
+      setIsPlaying(true);
       try {
         await audioRef.current.play();
-        console.log('🎵 [BANDCAMP] ✅ Playing');
-        setIsPlaying(true);
-        setTrackLoading(false);
       } catch (err) {
-        console.error('🎵 [BANDCAMP] ❌ Play error:', err);
+        console.error('Play error:', err);
         setIsPlaying(false);
-        setTrackLoading(false);
       }
     }
   };
@@ -254,7 +260,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
 
   const handleTrackSelect = (index: number) => {
     setCurrentTrackIndex(index);
-    // isPlaying will be set by the audio 'play' event
+    // If we're playing, the new track will auto-play via canplaythrough event
   };
 
   const handleSeek = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -381,7 +387,7 @@ export const BandcampPlayer: React.FC<BandcampPlayerProps> = ({
           {trackLoading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : (isPlaying ? <Pause /> : <PlayArrow />)}
         </IconButton>
         
-        <IconButton onClick={() => handleNext(false)} disabled={tracks.length <= 1}>
+        <IconButton onClick={handleNext} disabled={tracks.length <= 1}>
           <SkipNext />
         </IconButton>
       </Box>
