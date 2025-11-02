@@ -1214,7 +1214,7 @@ class AlbumsDatabase:
         
         query = '''
             SELECT 
-                album_id, album_name, band_name, type, release_date,
+                album_id, album_name, band_name, type, release_date, genre,
                 cover_art, cover_path, album_url,
                 youtube_embed_url, youtube_video_url, youtube_verified_title, youtube_verification_score, youtube_embed_type,
                 bandcamp_embed_url, bandcamp_verified_title, bandcamp_verification_score,

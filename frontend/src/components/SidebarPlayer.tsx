@@ -623,39 +623,46 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                       borderColor: 'primary.main',
                     }}
                   >
-                    <ListItemButton onClick={() => handleSelectAlbum(index)}>
-                      <ListItemAvatar>
-                        <Avatar
-                          variant="rounded"
-                          src={item.cover_path ? `${process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000'}/${item.cover_path}` : item.cover_art}
-                          alt={item.title}
-                        >
-                          <MusicNote />
-                        </Avatar>
-                      </ListItemAvatar>
-                      <ListItemText
-                        primary={
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Typography variant="body2" noWrap sx={{ flex: 1, fontWeight: isCurrentlyPlaying ? 'bold' : 'normal' }}>
-                              {item.title}
+                    <Tooltip 
+                      title={item.genre || 'Genre not available'} 
+                      placement="left"
+                      arrow
+                      enterDelay={500}
+                    >
+                      <ListItemButton onClick={() => handleSelectAlbum(index)}>
+                        <ListItemAvatar>
+                          <Avatar
+                            variant="rounded"
+                            src={item.cover_path ? `${process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000'}/${item.cover_path}` : item.cover_art}
+                            alt={item.title}
+                          >
+                            <MusicNote />
+                          </Avatar>
+                        </ListItemAvatar>
+                        <ListItemText
+                          primary={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Typography variant="body2" noWrap sx={{ flex: 1, fontWeight: isCurrentlyPlaying ? 'bold' : 'normal' }}>
+                                {item.title}
+                              </Typography>
+                              {availablePlatform && (
+                                <Box
+                                  component="img"
+                                  src={`/${availablePlatform === 'youtube' ? 'Youtube.svg' : 'Bandcamp.svg'}`}
+                                  alt={availablePlatform}
+                                  sx={{ width: 18, height: 18, opacity: 0.7 }}
+                                />
+                              )}
+                            </Box>
+                          }
+                          secondary={
+                            <Typography variant="caption" color="text.secondary" noWrap>
+                              {item.artist}
                             </Typography>
-                            {availablePlatform && (
-                              <Box
-                                component="img"
-                                src={`/${availablePlatform === 'youtube' ? 'Youtube.svg' : 'Bandcamp.svg'}`}
-                                alt={availablePlatform}
-                                sx={{ width: 18, height: 18, opacity: 0.7 }}
-                              />
-                            )}
-                          </Box>
-                        }
-                        secondary={
-                          <Typography variant="caption" color="text.secondary" noWrap>
-                            {item.artist}
-                          </Typography>
-                        }
-                      />
-                    </ListItemButton>
+                          }
+                        />
+                      </ListItemButton>
+                    </Tooltip>
                   </ListItem>
                 );
               })}

@@ -2065,6 +2065,7 @@ async def get_dynamic_playlist(
                 'artist': album['band_name'],
                 'type': album.get('type', 'Full-length'),
                 'release_date': album['release_date'],
+                'genre': album.get('genre'),
                 'cover_art': album.get('cover_art'),
                 'cover_path': album.get('cover_path'),
                 'album_url': album.get('album_url'),

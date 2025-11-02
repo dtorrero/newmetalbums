@@ -16,6 +16,7 @@ export interface PlaylistItem {
   artist: string;
   type: string;
   release_date: string;
+  genre?: string;
   cover_art?: string;
   cover_path?: string;
   album_url?: string;
