@@ -15,6 +15,17 @@ import {
   Button,
   useTheme,
   useMediaQuery,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  ListItemAvatar,
+  Avatar,
+  Paper,
+  Collapse,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -25,6 +36,7 @@ import {
   Close,
   MusicNote,
   OpenInNew,
+  QueueMusic,
 } from '@mui/icons-material';
 import { PlaylistItem, PlayerState } from '../types/playlist';
 import PlatformLinks from './PlatformLinks';
@@ -57,6 +69,9 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
     shuffle: false,
     repeat: 'none',
   });
+
+  // Playlist popup state
+  const [playlistOpen, setPlaylistOpen] = useState(false);
 
   // User's platform preference (stored in localStorage)
   const [platformPreference, setPlatformPreference] = useState<'bandcamp' | 'youtube'>(() => {
@@ -187,6 +202,18 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
 
   const handleShuffle = () => {
     setPlayerState(prev => ({ ...prev, shuffle: !prev.shuffle }));
+  };
+
+  const handleTogglePlaylist = () => {
+    setPlaylistOpen(prev => !prev);
+  };
+
+  const handleSelectAlbum = (index: number) => {
+    setPlayerState(prev => ({ ...prev, currentIndex: index }));
+    // Close playlist on mobile, keep open on desktop
+    if (isMobile) {
+      setPlaylistOpen(false);
+    }
   };
 
   const handlePlatformChange = (platform: 'bandcamp' | 'youtube') => {
@@ -397,6 +424,22 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                 
                 <IconButton
                   color="primary"
+                  onClick={handleTogglePlaylist}
+                  size="large"
+                  sx={{ 
+                    border: '1px solid', 
+                    borderColor: 'primary.main',
+                    bgcolor: playlistOpen ? 'primary.main' : 'transparent',
+                    '&:hover': {
+                      bgcolor: playlistOpen ? 'primary.dark' : 'rgba(255, 255, 255, 0.08)',
+                    }
+                  }}
+                >
+                  <QueueMusic />
+                </IconButton>
+                
+                <IconButton
+                  color="primary"
                   onClick={handleNext}
                   disabled={playlist.length <= 1}
                   size="large"
@@ -415,6 +458,15 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
                   size="large"
                 >
                   Previous Album
+                </Button>
+                
+                <Button
+                  variant={playlistOpen ? 'contained' : 'outlined'}
+                  startIcon={<QueueMusic />}
+                  onClick={handleTogglePlaylist}
+                  size="large"
+                >
+                  Playlist
                 </Button>
                 
                 <Button
@@ -451,6 +503,166 @@ export const SidebarPlayer: React.FC<SidebarPlayerProps> = ({
           </Box>
         )}
       </Box>
+
+      {/* Playlist Popup - Mobile (Dialog) */}
+      {isMobile && (
+        <Dialog
+          open={playlistOpen}
+          onClose={() => setPlaylistOpen(false)}
+          fullWidth
+          maxWidth="sm"
+          PaperProps={{
+            sx: {
+              position: 'fixed',
+              top: 0,
+              m: 0,
+              maxHeight: '70vh',
+            }
+          }}
+        >
+          <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Playlist ({playlist.length} albums)</Typography>
+            <IconButton onClick={() => setPlaylistOpen(false)} size="small">
+              <Close />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
+            <List sx={{ py: 0 }}>
+              {playlist.map((item, index) => {
+                const isCurrentlyPlaying = index === playerState.currentIndex;
+                const availablePlatform = item.platforms.bandcamp ? 'bandcamp' : item.platforms.youtube ? 'youtube' : null;
+                
+                return (
+                  <ListItem
+                    key={`${item.album_id}-${index}`}
+                    disablePadding
+                    sx={{
+                      bgcolor: isCurrentlyPlaying ? 'action.selected' : 'transparent',
+                      borderLeft: isCurrentlyPlaying ? '4px solid' : '4px solid transparent',
+                      borderColor: 'primary.main',
+                    }}
+                  >
+                    <ListItemButton onClick={() => handleSelectAlbum(index)}>
+                      <ListItemAvatar>
+                        <Avatar
+                          variant="rounded"
+                          src={item.cover_path ? `${process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000'}/${item.cover_path}` : item.cover_art}
+                          alt={item.title}
+                        >
+                          <MusicNote />
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography variant="body2" noWrap sx={{ flex: 1, fontWeight: isCurrentlyPlaying ? 'bold' : 'normal' }}>
+                              {item.title}
+                            </Typography>
+                            {availablePlatform && (
+                              <Box
+                                component="img"
+                                src={`/${availablePlatform === 'youtube' ? 'Youtube.svg' : 'Bandcamp.svg'}`}
+                                alt={availablePlatform}
+                                sx={{ width: 16, height: 16, opacity: 0.7 }}
+                              />
+                            )}
+                          </Box>
+                        }
+                        secondary={
+                          <Typography variant="caption" color="text.secondary" noWrap>
+                            {item.artist}
+                          </Typography>
+                        }
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                );
+              })}
+            </List>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Playlist Popup - Desktop (Collapsible Panel) */}
+      {!isMobile && (
+        <Collapse in={playlistOpen} orientation="horizontal">
+          <Paper
+            elevation={3}
+            sx={{
+              position: 'fixed',
+              right: SIDEBAR_WIDTH,
+              top: 0,
+              bottom: 0,
+              width: 350,
+              bgcolor: 'background.paper',
+              borderRight: '1px solid',
+              borderColor: 'divider',
+              display: 'flex',
+              flexDirection: 'column',
+              zIndex: 1200,
+            }}
+          >
+            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="h6">Playlist ({playlist.length})</Typography>
+              <IconButton onClick={() => setPlaylistOpen(false)} size="small">
+                <Close />
+              </IconButton>
+            </Box>
+            <List sx={{ flex: 1, overflow: 'auto', py: 0 }}>
+              {playlist.map((item, index) => {
+                const isCurrentlyPlaying = index === playerState.currentIndex;
+                const availablePlatform = item.platforms.bandcamp ? 'bandcamp' : item.platforms.youtube ? 'youtube' : null;
+                
+                return (
+                  <ListItem
+                    key={`${item.album_id}-${index}`}
+                    disablePadding
+                    sx={{
+                      bgcolor: isCurrentlyPlaying ? 'action.selected' : 'transparent',
+                      borderLeft: isCurrentlyPlaying ? '4px solid' : '4px solid transparent',
+                      borderColor: 'primary.main',
+                    }}
+                  >
+                    <ListItemButton onClick={() => handleSelectAlbum(index)}>
+                      <ListItemAvatar>
+                        <Avatar
+                          variant="rounded"
+                          src={item.cover_path ? `${process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8000'}/${item.cover_path}` : item.cover_art}
+                          alt={item.title}
+                        >
+                          <MusicNote />
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography variant="body2" noWrap sx={{ flex: 1, fontWeight: isCurrentlyPlaying ? 'bold' : 'normal' }}>
+                              {item.title}
+                            </Typography>
+                            {availablePlatform && (
+                              <Box
+                                component="img"
+                                src={`/${availablePlatform === 'youtube' ? 'Youtube.svg' : 'Bandcamp.svg'}`}
+                                alt={availablePlatform}
+                                sx={{ width: 18, height: 18, opacity: 0.7 }}
+                              />
+                            )}
+                          </Box>
+                        }
+                        secondary={
+                          <Typography variant="caption" color="text.secondary" noWrap>
+                            {item.artist}
+                          </Typography>
+                        }
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                );
+              })}
+            </List>
+          </Paper>
+        </Collapse>
+      )}
     </Drawer>
   );
 };
