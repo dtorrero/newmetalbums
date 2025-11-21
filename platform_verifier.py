@@ -453,6 +453,146 @@ class PlatformVerifier:
             logger.error(f"Error searching YouTube playlists: {e}")
             return []
     
+    async def search_bandcamp_globally(
+        self,
+        album_name: str,
+        band_name: str,
+        min_similarity: int = 75,
+    ) -> Dict[str, any]:
+        """Search Bandcamp globally for an album using the public search page.
+
+        This does NOT rely on Metal Archives related links. It uses the official
+        Bandcamp search endpoint restricted to albums only:
+
+            https://bandcamp.com/search?q={query}&item_type=a
+
+        The query combines band and album name to increase precision.
+        """
+        try:
+            # Build query string using both band and album names
+            query = f"{band_name} {album_name}".strip()
+            from urllib.parse import quote_plus
+            encoded_query = quote_plus(query)
+            search_url = f"https://bandcamp.com/search?q={encoded_query}&item_type=a"
+
+            logger.info(f"Searching Bandcamp for album: {query}")
+
+            await self.page.goto(search_url, wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(2)
+
+            # Extract album search results (title + URL)
+            results = await self.page.evaluate('''() => {
+                const items = [];
+                // Bandcamp album search result items
+                const resultItems = document.querySelectorAll('.result-items .searchresult');
+
+                resultItems.forEach(el => {
+                    const titleEl = el.querySelector('.heading, .result-info .heading');
+                    const linkEl = el.querySelector('a');
+
+                    if (titleEl && linkEl && linkEl.href) {
+                        const title = titleEl.textContent?.trim() || '';
+                        const href = linkEl.href;
+
+                        if (title && href) {
+                            items.push({
+                                title: title,
+                                url: href
+                            });
+                        }
+                    }
+                });
+
+                return items;
+            }''')
+
+            if not results:
+                logger.warning(f"No Bandcamp results found for: {query}")
+                return {'found': False, 'match_score': 0}
+
+            # Fuzzy match results against album and band
+            matches = []
+            search_term = f"{band_name} {album_name}".lower()
+
+            for result in results:
+                title_lower = result['title'].lower()
+
+                full_score = fuzz.token_sort_ratio(search_term, title_lower)
+                album_score = fuzz.partial_ratio(album_name.lower(), title_lower)
+                band_score = fuzz.partial_ratio(band_name.lower(), title_lower)
+
+                # Prefer results that contain both band and album names
+                if band_score > 70 and album_score > 70:
+                    score = max(full_score, (album_score + band_score) // 2)
+                else:
+                    score = max(full_score, album_score)
+
+                if score >= min_similarity:
+                    matches.append({
+                        'title': result['title'],
+                        'url': result['url'],
+                        'score': min(score, 100),
+                    })
+
+            if not matches:
+                logger.warning(f"No Bandcamp matches above {min_similarity}% similarity")
+                return {'found': False, 'match_score': 0}
+
+            matches.sort(key=lambda x: x['score'], reverse=True)
+            best_match = matches[0]
+
+            logger.info(f"Bandcamp match: {best_match['title']} (score: {best_match['score']})")
+
+            return {
+                'found': True,
+                'album_url': best_match['url'],
+                'title': best_match['title'],
+                'match_score': best_match['score'],
+            }
+
+        except Exception as e:
+            logger.error(f"Error searching Bandcamp: {e}")
+            return {'found': False, 'error': str(e), 'match_score': 0}
+
+    async def verify_bandcamp_from_search(
+        self,
+        album_name: str,
+        band_name: str,
+        min_similarity: int = 75,
+    ) -> Dict[str, any]:
+        """Verify Bandcamp album using global Bandcamp search instead of MA links."""
+        try:
+            search_result = await self.search_bandcamp_globally(
+                album_name=album_name,
+                band_name=band_name,
+                min_similarity=min_similarity,
+            )
+
+            if not search_result.get('found'):
+                return {'found': False, 'match_score': search_result.get('match_score', 0)}
+
+            album_url = search_result['album_url']
+
+            # Navigate to the specific album page to get embed code
+            await self.page.goto(album_url, wait_until='networkidle', timeout=30000)
+            await asyncio.sleep(1)
+
+            # Try to extract embed code / embed URL
+            embed_info = await self._extract_bandcamp_embed(album_url)
+
+            return {
+                'found': True,
+                'album_url': album_url,
+                'embed_url': embed_info.get('embed_url', album_url),
+                'embed_code': embed_info.get('embed_code', ''),
+                'match_score': search_result['match_score'],
+                'title': search_result['title'],
+            }
+
+        except Exception as e:
+            logger.error(f"Error verifying Bandcamp album from search: {e}")
+            return {'found': False, 'error': str(e), 'match_score': 0}
+    
     async def verify_bandcamp_album(
         self, 
         bandcamp_url: str, 

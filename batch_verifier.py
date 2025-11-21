@@ -87,47 +87,45 @@ class BatchVerifier:
         
         for attempt in range(max_retries + 1):
             try:
-                # Verify YouTube
-                youtube_url = album.get('youtube_url')
-                if youtube_url and youtube_url != 'N/A' and youtube_url.strip():
-                    try:
-                        youtube_result = await self.verifier.verify_youtube_album(
-                            youtube_url=youtube_url,
-                            album_name=album_name,
-                            band_name=band_name,
-                            min_similarity=min_similarity
-                        )
-                        if youtube_result.get('found'):
-                            result['youtube'] = youtube_result
-                            logger.info(f"  ✓ YouTube verified (score: {youtube_result['match_score']})")
-                        else:
-                            logger.warning(f"  ✗ YouTube not found")
-                    except Exception as e:
-                        error_msg = str(e)
-                        if 'Target page, context or browser has been closed' in error_msg or 'Connection closed' in error_msg:
-                            raise  # Re-raise connection errors to trigger retry
-                        logger.error(f"  ✗ YouTube verification error: {e}")
-                
-                # Verify Bandcamp
-                bandcamp_url = album.get('bandcamp_url')
-                if bandcamp_url and bandcamp_url != 'N/A' and bandcamp_url.strip():
-                    try:
-                        bandcamp_result = await self.verifier.verify_bandcamp_album(
-                            bandcamp_url=bandcamp_url,
-                            album_name=album_name,
-                            album_type=album.get('type', 'album'),
-                            min_similarity=min_similarity
-                        )
-                        if bandcamp_result.get('found'):
-                            result['bandcamp'] = bandcamp_result
-                            logger.info(f"  ✓ Bandcamp verified (score: {bandcamp_result['match_score']})")
-                        else:
-                            logger.warning(f"  ✗ Bandcamp not found")
-                    except Exception as e:
-                        error_msg = str(e)
-                        if 'Target page, context or browser has been closed' in error_msg or 'Connection closed' in error_msg:
-                            raise  # Re-raise connection errors to trigger retry
-                        logger.error(f"  ✗ Bandcamp verification error: {e}")
+                # NOTE: We no longer depend on Metal Archives related links for
+                # YouTube or Bandcamp. Instead we always perform our own
+                # full-text searches using album and band names.
+
+                # Verify YouTube via global search with strict 90%+ similarity
+                try:
+                    youtube_result = await self.verifier.search_youtube_directly(
+                        album_name=album_name,
+                        band_name=band_name,
+                        min_similarity=90,
+                    )
+                    if youtube_result.get('found'):
+                        result['youtube'] = youtube_result
+                        logger.info(f"  ✓ YouTube verified (score: {youtube_result['match_score']})")
+                    else:
+                        logger.warning("  ✗ YouTube not found with ≥90% similarity")
+                except Exception as e:
+                    error_msg = str(e)
+                    if 'Target page, context or browser has been closed' in error_msg or 'Connection closed' in error_msg:
+                        raise  # Re-raise connection errors to trigger retry
+                    logger.error(f"  ✗ YouTube verification error: {e}")
+
+                # Verify Bandcamp via global Bandcamp search (albums only) with 90%+ similarity
+                try:
+                    bandcamp_result = await self.verifier.verify_bandcamp_from_search(
+                        album_name=album_name,
+                        band_name=band_name,
+                        min_similarity=90,
+                    )
+                    if bandcamp_result.get('found'):
+                        result['bandcamp'] = bandcamp_result
+                        logger.info(f"  ✓ Bandcamp verified (score: {bandcamp_result['match_score']})")
+                    else:
+                        logger.warning("  ✗ Bandcamp not found with ≥90% similarity")
+                except Exception as e:
+                    error_msg = str(e)
+                    if 'Target page, context or browser has been closed' in error_msg or 'Connection closed' in error_msg:
+                        raise  # Re-raise connection errors to trigger retry
+                    logger.error(f"  ✗ Bandcamp verification error: {e}")
                 
                 # Mark as success if at least one platform verified
                 result['success'] = result['youtube'] is not None or result['bandcamp'] is not None
@@ -259,7 +257,6 @@ class BatchVerifier:
             FROM albums
             WHERE release_date BETWEEN ? AND ?
             AND (playable_verified = 0 OR playable_verified IS NULL)
-            AND (youtube_url IS NOT NULL OR bandcamp_url IS NOT NULL)
         ''', (start_date, end_date))
         
         albums = [dict(row) for row in cursor.fetchall()]

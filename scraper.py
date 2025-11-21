@@ -786,6 +786,10 @@ class MetalArchivesScraper:
 
     async def _extract_platform_links(self, band_url: str) -> Dict[str, Optional[str]]:
         """Extract platform links (Bandcamp, YouTube, Spotify, etc.) from band's Related Links page."""
+        # NOTE: These Metal Archives platform links are kept for reference and
+        # debugging. The playable URL verification pipeline no longer depends
+        # on them and instead performs its own global searches (YouTube and
+        # Bandcamp) based on band and album names.
         result = {}
         
         # Check if link extraction is enabled
