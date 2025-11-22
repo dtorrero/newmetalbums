@@ -30,6 +30,7 @@ from auth_manager import AuthManager
 from genre_parser import GenreParser
 from platform_verifier import PlatformVerifier
 from youtube_cache_manager import YouTubeCacheManager
+from youtube_download_manager import YouTubeDownloadManager
 import config
 
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +48,9 @@ youtube_cache = YouTubeCacheManager(
     max_size_gb=config.YOUTUBE_CACHE_MAX_SIZE_GB
 )
 
+# Global YouTube download manager (handles parallel downloads)
+youtube_download_manager = None  # Will be initialized in lifespan
+
 # Track active downloads to prevent duplicates and allow cancellation
 active_downloads: Dict[str, asyncio.Task] = {}
 download_locks: Dict[str, asyncio.Lock] = {}
@@ -59,12 +63,36 @@ security = HTTPBearer()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global youtube_download_manager
+    
     # Startup
     db.connect()
     db.create_tables()  # Create tables if they don't exist
     logger.info("🗄️ Database connected and initialized")
+    
+    # Initialize YouTube download manager
+    max_parallel = db.get_setting('youtube_parallel_downloads')
+    if max_parallel is None:
+        max_parallel = config.YOUTUBE_PARALLEL_DOWNLOADS
+    
+    youtube_download_manager = YouTubeDownloadManager(
+        cache_dir=config.YOUTUBE_CACHE_DIR,
+        youtube_cache_manager=youtube_cache,
+        max_parallel=int(max_parallel),
+        download_timeout=config.YOUTUBE_DOWNLOAD_TIMEOUT
+    )
+    
+    # Start download workers
+    await youtube_download_manager.start_workers()
+    logger.info("🎬 YouTube download manager started")
+    
     yield
+    
     # Shutdown
+    if youtube_download_manager:
+        await youtube_download_manager.stop_workers()
+        logger.info("🎬 YouTube download manager stopped")
+    
     db.close()
     logger.info("🗄️ Database disconnected")
 
@@ -598,6 +626,93 @@ async def run_scraper_task_with_lock(scrape_date: str, download_covers: bool = T
         finally:
             logger.info(f"🔓 Released scraping lock for date: {scrape_date}")
 
+async def queue_youtube_downloads_for_date(start_date: str, end_date: str) -> Dict:
+    """
+    Queue YouTube downloads for all verified albums in a date range.
+    Uses a separate download manager instance with configurable parallelism.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        
+    Returns:
+        Dictionary with download statistics
+    """
+    try:
+        logger.info(f"🎬 [POST-SCRAPE] Queuing YouTube downloads for {start_date} to {end_date}")
+        
+        # Get post-scrape parallel download setting
+        post_scrape_parallel = db.get_setting('youtube_post_scrape_downloads')
+        if post_scrape_parallel is None:
+            post_scrape_parallel = config.YOUTUBE_POST_SCRAPE_DOWNLOADS
+        post_scrape_parallel = int(post_scrape_parallel)
+        
+        logger.info(f"🎬 [POST-SCRAPE] Using {post_scrape_parallel} parallel download(s)")
+        
+        # Query albums with verified YouTube URLs in date range
+        cursor = db.connection.cursor()
+        cursor.execute('''
+            SELECT album_id, youtube_embed_url, youtube_video_url
+            FROM albums
+            WHERE release_date BETWEEN ? AND ?
+            AND playable_verified = 1
+            AND (youtube_embed_url IS NOT NULL OR youtube_video_url IS NOT NULL)
+        ''', (start_date, end_date))
+        
+        albums = cursor.fetchall()
+        logger.info(f"🎬 [POST-SCRAPE] Found {len(albums)} albums with YouTube URLs")
+        
+        if not albums:
+            return {'queued': 0, 'skipped': 0, 'total': 0}
+        
+        # Extract video IDs from URLs
+        video_ids = []
+        import re
+        
+        for album_id, youtube_embed_url, youtube_video_url in albums:
+            # Try to extract video ID from either URL
+            video_id = None
+            
+            if youtube_video_url:
+                # Extract from video URL: https://www.youtube.com/watch?v=VIDEO_ID
+                match = re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', youtube_video_url)
+                if match:
+                    video_id = match.group(1)
+            
+            if not video_id and youtube_embed_url:
+                # Extract from embed URL: https://youtube-nocookie.com/embed/VIDEO_ID
+                match = re.search(r'/embed/([a-zA-Z0-9_-]{11})', youtube_embed_url)
+                if match:
+                    video_id = match.group(1)
+            
+            if video_id:
+                # Check if already cached
+                cached_file = youtube_cache.get_cached_file(video_id)
+                if not cached_file:
+                    video_ids.append(video_id)
+                    logger.debug(f"🎬 [POST-SCRAPE] Queuing {video_id} for album {album_id}")
+                else:
+                    logger.debug(f"🎬 [POST-SCRAPE] Skipping {video_id} (already cached)")
+        
+        logger.info(f"🎬 [POST-SCRAPE] Queuing {len(video_ids)} videos for download ({len(albums) - len(video_ids)} already cached)")
+        
+        # Queue all videos using the main download manager
+        # Note: We use the same download manager but it will respect the queue
+        for video_id in video_ids:
+            await youtube_download_manager.download_video(video_id, priority=False)
+        
+        return {
+            'queued': len(video_ids),
+            'skipped': len(albums) - len(video_ids),
+            'total': len(albums)
+        }
+        
+    except Exception as e:
+        logger.error(f"🎬 [POST-SCRAPE] Error queuing downloads: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {'queued': 0, 'skipped': 0, 'total': 0, 'error': str(e)}
+
 async def run_scraper_task(scrape_date: str, download_covers: bool = True):
     """Background task to run the scraper"""
     global scraping_status
@@ -799,13 +914,17 @@ async def run_scraper_task(scrape_date: str, download_covers: bool = True):
             
             logger.info(f"✓ Verification complete: {verification_stats['verified']}/{verification_stats['total']} albums verified")
             
+            # Queue YouTube downloads for verified albums
+            download_stats = await queue_youtube_downloads_for_date(db_date_format, db_date_format)
+            
             scraping_status.update({
                 "is_running": False,
-                "status_message": f"Successfully scraped {len(albums)} albums and verified {verification_stats['verified']} playable URLs for {scrape_date}",
+                "status_message": f"Successfully scraped {len(albums)} albums, verified {verification_stats['verified']} playable URLs, and queued {download_stats['queued']} YouTube downloads for {scrape_date}",
                 "end_time": datetime.now().isoformat(),
                 "should_stop": False,
                 "rate_limited": False,
-                "verification_stats": verification_stats
+                "verification_stats": verification_stats,
+                "download_stats": download_stats
             })
             
         except Exception as verify_error:
@@ -938,19 +1057,24 @@ async def stop_scraping(token: str = Depends(verify_admin_token)):
 @app.get("/api/youtube/audio/{video_id}")
 async def get_youtube_audio(video_id: str):
     """
-    Download and cache YouTube audio, then serve it.
-    Uses yt-dlp to download audio to a cache directory with LRU eviction.
+    Serve cached YouTube audio file.
+    
+    NEW BEHAVIOR:
+    - Only serves files that are already cached
+    - Returns 404 if file is not available
+    - Does NOT initiate downloads (use /api/youtube/queue endpoint to queue downloads)
+    
+    This prevents blocking the player while waiting for downloads.
     """
     from fastapi.responses import FileResponse
-    import yt_dlp
     
-    logger.info(f"🎬 [YOUTUBE/CACHE] Request for video: {video_id}")
+    logger.info(f"🎬 [YOUTUBE/AUDIO] Request for video: {video_id}")
     
     # Check if already cached
     cached_file = youtube_cache.get_cached_file(video_id)
     if cached_file:
         file_size_mb = cached_file.stat().st_size / 1024 / 1024
-        logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Serving from cache: {cached_file.name} ({file_size_mb:.2f} MB)")
+        logger.info(f"🎬 [YOUTUBE/AUDIO] ✅ Serving from cache: {cached_file.name} ({file_size_mb:.2f} MB)")
         
         # Determine media type
         media_type = "audio/webm"
@@ -970,190 +1094,21 @@ async def get_youtube_audio(video_id: str):
             }
         )
     
-    # Not cached - need to download
-    # Use a lock to prevent concurrent downloads of the same video
-    if video_id not in download_locks:
-        download_locks[video_id] = asyncio.Lock()
+    # Not cached - check if currently downloading
+    download_status = youtube_download_manager.get_download_status(video_id)
+    if download_status:
+        logger.info(f"🎬 [YOUTUBE/AUDIO] ⏳ {video_id} is {download_status.status.value}")
+        raise HTTPException(
+            status_code=202,  # Accepted - processing
+            detail=f"Audio file is being downloaded. Status: {download_status.status.value}"
+        )
     
-    async with download_locks[video_id]:
-        # Check cache again in case another request downloaded it while we waited
-        cached_file = youtube_cache.get_cached_file(video_id)
-        if cached_file:
-            file_size_mb = cached_file.stat().st_size / 1024 / 1024
-            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Serving from cache (downloaded by another request): {cached_file.name} ({file_size_mb:.2f} MB)")
-            
-            media_type = "audio/webm"
-            if cached_file.suffix == '.mp4' or cached_file.suffix == '.m4a':
-                media_type = "audio/mp4"
-            elif cached_file.suffix == '.opus':
-                media_type = "audio/opus"
-            elif cached_file.suffix == '.ogg':
-                media_type = "audio/ogg"
-            
-            return FileResponse(
-                cached_file,
-                media_type=media_type,
-                headers={
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "public, max-age=31536000",
-                }
-            )
-        
-        cache_dir = Path(config.YOUTUBE_CACHE_DIR)
-        cache_dir.mkdir(exist_ok=True)
-        
-        # Use video ID as filename (safe for filesystem)
-        cache_file = cache_dir / f"{video_id}.webm"
-        
-        # Clean up any partial downloads from previous attempts (including fragments)
-        logger.info(f"🎬 [YOUTUBE/CACHE] Cleaning up any previous partial downloads for: {video_id}")
-        for pattern in [f"{video_id}*"]:
-            for old_file in cache_dir.glob(pattern):
-                if '.part' in old_file.name or '.ytdl' in old_file.name or 'Frag' in old_file.name:
-                    try:
-                        old_file.unlink()
-                        logger.debug(f"🎬 [YOUTUBE/CACHE] Deleted: {old_file.name}")
-                    except Exception as e:
-                        logger.warning(f"🎬 [YOUTUBE/CACHE] Could not delete {old_file.name}: {e}")
-        
-        # Cleanup cache if needed (estimate 10MB for new file)
-        youtube_cache.cleanup_if_needed(10 * 1024 * 1024)
-        
-        # Download using yt-dlp (async to avoid blocking server)
-        try:
-            logger.info(f"🎬 [YOUTUBE/CACHE] Downloading audio for: {video_id}")
-            
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            
-            # First, get info without downloading to check file size
-            def get_info():
-                ydl_opts_info = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'skip_download': True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-                    return ydl.extract_info(video_url, download=False)
-            
-            # Run info extraction in thread pool to avoid blocking
-            info_only = await asyncio.to_thread(get_info)
-            
-            # Store file size info for potential notification
-            filesize_mb = 0
-            estimated_time = "unknown"
-            
-            if info_only:
-                # Get estimated file size
-                filesize = info_only.get('filesize') or info_only.get('filesize_approx', 0)
-                filesize_mb = filesize / 1024 / 1024 if filesize else 0
-                
-                # Estimate download time (assuming ~2 MB/s average download speed)
-                if filesize_mb > 0:
-                    estimated_seconds = filesize_mb / 2.0
-                    if estimated_seconds < 60:
-                        estimated_time = f"{int(estimated_seconds)}s"
-                    else:
-                        estimated_time = f"{int(estimated_seconds / 60)}m {int(estimated_seconds % 60)}s"
-                
-                if filesize_mb > 50:
-                    logger.warning(f"🎬 [YOUTUBE/CACHE] ⚠️ Large file detected: {filesize_mb:.1f} MB")
-                
-                logger.info(f"🎬 [YOUTUBE/CACHE] Estimated size: {filesize_mb:.1f} MB, time: {estimated_time}")
-            
-            # Now download
-            def download_audio():
-                ydl_opts = {
-                    # Prefer smaller audio formats: opus (best compression), m4a, then fallback
-                    'format': 'bestaudio[ext=opus]/bestaudio[ext=m4a]/bestaudio[ext=webm]/ba/b',
-                    'outtmpl': str(cache_file.with_suffix('.%(ext)s')),  # Let yt-dlp add the extension
-                    'quiet': False,
-                    'no_warnings': False,
-                    'logger': logger,
-                    # Use actual player JS version to avoid signature extraction issues
-                    'extractor_args': {
-                        'youtube': {
-                            'player_js_version': ['actual'],  # Must be a list
-                        }
-                    },
-                    'nocheckcertificate': True,
-                    'geo_bypass': True,
-                    # Prefer smaller file sizes
-                    'prefer_free_formats': True,
-                    'postprocessors': [],  # No post-processing
-                }
-                
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    return ydl.extract_info(video_url, download=True)
-            
-            # Run download in thread pool to avoid blocking the server
-            info = await asyncio.to_thread(download_audio)
-            
-            if not info:
-                raise HTTPException(status_code=404, detail="Could not download video")
-            
-            logger.info(f"🎬 [YOUTUBE/CACHE] ✅ Download completed")
-            
-            # Find the downloaded file (yt-dlp might add extension)
-            if not cache_file.exists():
-                # Try common extensions
-                for ext in ['.webm', '.m4a', '.mp4', '.opus', '.ogg']:
-                    alt_file = cache_file.with_suffix(ext)
-                    if alt_file.exists():
-                        cache_file = alt_file
-                        logger.info(f"🎬 [YOUTUBE/CACHE] Found file with extension: {ext}")
-                        break
-            
-            if not cache_file.exists():
-                logger.error(f"🎬 [YOUTUBE/CACHE] File not found after download")
-                raise HTTPException(status_code=500, detail="Download succeeded but file not found")
-            
-            # Verify file is not empty
-            file_size = cache_file.stat().st_size
-            if file_size == 0:
-                logger.error(f"🎬 [YOUTUBE/CACHE] Downloaded file is empty")
-                cache_file.unlink()  # Delete empty file
-                raise HTTPException(status_code=500, detail="Downloaded file is empty. Video may be unavailable.")
-            
-            file_size_mb = file_size / 1024 / 1024
-            logger.info(f"🎬 [YOUTUBE/CACHE] File verified: {cache_file.name} ({file_size_mb:.2f} MB)")
-            
-            # Determine media type based on extension
-            media_type = "audio/webm"
-            if cache_file.suffix == '.mp4':
-                media_type = "audio/mp4"
-            elif cache_file.suffix == '.m4a':
-                media_type = "audio/mp4"
-            elif cache_file.suffix == '.opus':
-                media_type = "audio/opus"
-            elif cache_file.suffix == '.ogg':
-                media_type = "audio/ogg"
-            
-            # Add to cache manager ONLY after successful verification
-            youtube_cache.add_file(video_id, cache_file.name, file_size)
-            logger.info(f"🎬 [YOUTUBE/CACHE] Serving file: {cache_file.name} ({media_type}, {file_size_mb:.2f} MB)")
-            
-            return FileResponse(
-                cache_file,
-                media_type=media_type,
-                headers={
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "public, max-age=31536000",
-                }
-            )
-        except Exception as e:
-            # Clean up any partial files on error
-            logger.error(f"🎬 [YOUTUBE/CACHE] ❌ Error: {e}")
-            for ext in ['.webm', '.m4a', '.mp4', '.opus', '.ogg']:
-                failed_file = cache_file.with_suffix(ext)
-                if failed_file.exists():
-                    logger.info(f"🎬 [YOUTUBE/CACHE] Cleaning up failed download: {failed_file.name}")
-                    try:
-                        failed_file.unlink()
-                    except:
-                        pass
-            import traceback
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Failed to download YouTube audio. The video may be unavailable or restricted. Error: {str(e)}")
+    # Not cached and not downloading
+    logger.warning(f"🎬 [YOUTUBE/AUDIO] ❌ {video_id} not available")
+    raise HTTPException(
+        status_code=404,
+        detail="Audio file not available. Please queue it for download first."
+    )
 
 @app.get("/api/youtube/audio/{video_id}/info")
 async def get_youtube_audio_info(video_id: str):
@@ -1213,6 +1168,110 @@ async def get_youtube_audio_info(video_id: str):
             "size_mb": 0,
             "estimated_time": "unknown"
         }
+
+@app.post("/api/youtube/queue")
+async def queue_youtube_download(video_ids: List[str], current_index: int = 0):
+    """
+    Queue YouTube videos for download.
+    
+    Args:
+        video_ids: List of YouTube video IDs to download
+        current_index: Index of currently playing track (gets priority)
+    
+    Returns:
+        Status of queued downloads
+    """
+    if not video_ids:
+        raise HTTPException(status_code=400, detail="No video IDs provided")
+    
+    logger.info(f"🎬 [YOUTUBE/QUEUE] Received request to queue {len(video_ids)} videos")
+    
+    # Queue the playlist for download
+    await youtube_download_manager.download_playlist(video_ids, current_index)
+    
+    # Get status of each video
+    statuses = []
+    for video_id in video_ids:
+        cached_file = youtube_cache.get_cached_file(video_id)
+        if cached_file:
+            statuses.append({
+                "video_id": video_id,
+                "status": "cached",
+                "size_mb": round(cached_file.stat().st_size / 1024 / 1024, 1)
+            })
+        else:
+            download_status = youtube_download_manager.get_download_status(video_id)
+            if download_status:
+                statuses.append({
+                    "video_id": video_id,
+                    "status": download_status.status.value,
+                    "attempts": download_status.attempts,
+                    "error": download_status.error
+                })
+            else:
+                statuses.append({
+                    "video_id": video_id,
+                    "status": "queued"
+                })
+    
+    return {
+        "message": f"Queued {len(video_ids)} videos for download",
+        "statuses": statuses
+    }
+
+@app.get("/api/youtube/download/status/{video_id}")
+async def get_download_status(video_id: str):
+    """
+    Get download status for a specific video.
+    
+    Returns:
+        Download status including progress, errors, etc.
+    """
+    # Check if cached
+    cached_file = youtube_cache.get_cached_file(video_id)
+    if cached_file:
+        return {
+            "video_id": video_id,
+            "status": "completed",
+            "cached": True,
+            "size_mb": round(cached_file.stat().st_size / 1024 / 1024, 1)
+        }
+    
+    # Check download status
+    download_status = youtube_download_manager.get_download_status(video_id)
+    if download_status:
+        return {
+            "video_id": video_id,
+            "status": download_status.status.value,
+            "cached": False,
+            "attempts": download_status.attempts,
+            "max_attempts": download_status.max_attempts,
+            "error": download_status.error,
+            "started_at": download_status.started_at.isoformat() if download_status.started_at else None,
+            "completed_at": download_status.completed_at.isoformat() if download_status.completed_at else None
+        }
+    
+    return {
+        "video_id": video_id,
+        "status": "not_found",
+        "cached": False
+    }
+
+@app.get("/api/youtube/download/stats")
+async def get_download_stats():
+    """
+    Get overall download statistics.
+    
+    Returns:
+        Statistics about downloads (success rate, active downloads, etc.)
+    """
+    stats = youtube_download_manager.get_statistics()
+    cache_stats = youtube_cache.get_cache_stats()
+    
+    return {
+        "download_stats": stats,
+        "cache_stats": cache_stats
+    }
 
 @app.get("/api/youtube/stream")
 async def get_youtube_stream(url: str):
@@ -1277,15 +1336,26 @@ async def get_youtube_stream(url: str):
             if 'entries' in info:
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] Type: PLAYLIST with {len(info.get('entries', []))} entries")
                 tracks = []
+                video_ids = []
+                
                 for idx, entry in enumerate(info['entries']):
-                    if entry and 'url' in entry:
-                        logger.info(f"🎬 [YOUTUBE/YT-DLP]   Track {idx+1}: {entry.get('title', 'Unknown')}")
-                        tracks.append({
-                            'title': entry.get('title', 'Unknown'),
-                            'duration': entry.get('duration', 0),
-                            'stream_url': entry.get('url'),
-                            'thumbnail': entry.get('thumbnail'),
-                        })
+                    if entry:
+                        video_id = entry.get('id')
+                        if video_id:
+                            video_ids.append(video_id)
+                            logger.info(f"🎬 [YOUTUBE/YT-DLP]   Track {idx+1}: {entry.get('title', 'Unknown')} (ID: {video_id})")
+                            tracks.append({
+                                'title': entry.get('title', 'Unknown'),
+                                'duration': entry.get('duration', 0),
+                                'url': f"https://www.youtube.com/watch?v={video_id}",
+                                'video_id': video_id,
+                                'thumbnail': entry.get('thumbnail'),
+                            })
+                
+                # Queue all videos for download immediately (prioritize first track)
+                if video_ids:
+                    logger.info(f"🎬 [YOUTUBE/YT-DLP] Queuing {len(video_ids)} videos for download")
+                    await youtube_download_manager.download_playlist(video_ids, current_index=0)
                 
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] ✅ SUCCESS - Returning {len(tracks)} tracks")
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] ========== END ==========")
@@ -1299,11 +1369,17 @@ async def get_youtube_stream(url: str):
             
             # Handle single video
             else:
-                stream_url = info.get('url')
+                video_id = info.get('id')
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] Type: SINGLE VIDEO")
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] Title: {info.get('title', 'Unknown')}")
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] Duration: {info.get('duration', 0)}s")
-                logger.info(f"🎬 [YOUTUBE/YT-DLP] Stream URL: {stream_url[:100] if stream_url else 'None'}...")
+                logger.info(f"🎬 [YOUTUBE/YT-DLP] Video ID: {video_id}")
+                
+                # Queue single video for download immediately
+                if video_id:
+                    logger.info(f"🎬 [YOUTUBE/YT-DLP] Queuing video for download: {video_id}")
+                    await youtube_download_manager.download_video(video_id, priority=True)
+                
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] ✅ SUCCESS")
                 logger.info(f"🎬 [YOUTUBE/YT-DLP] ========== END ==========")
                 return {
@@ -1311,7 +1387,8 @@ async def get_youtube_stream(url: str):
                     'type': 'video',
                     'title': info.get('title', 'Unknown'),
                     'duration': info.get('duration', 0),
-                    'stream_url': stream_url,
+                    'video_id': video_id,
+                    'url': f"https://www.youtube.com/watch?v={video_id}" if video_id else None,
                     'thumbnail': info.get('thumbnail'),
                 }
         
@@ -1581,14 +1658,29 @@ async def clear_cache(token: str = Depends(verify_admin_token)):
 
 @app.get("/api/admin/settings/cache")
 async def get_cache_settings(token: str = Depends(verify_admin_token)):
-    """Get YouTube cache settings"""
+    """Get YouTube cache and download settings"""
     try:
         max_size_gb = db.get_setting('youtube_cache_max_size_gb')
         if max_size_gb is None:
             max_size_gb = config.YOUTUBE_CACHE_MAX_SIZE_GB
         
+        parallel_downloads = db.get_setting('youtube_parallel_downloads')
+        if parallel_downloads is None:
+            parallel_downloads = config.YOUTUBE_PARALLEL_DOWNLOADS
+        
+        download_timeout = db.get_setting('youtube_download_timeout')
+        if download_timeout is None:
+            download_timeout = config.YOUTUBE_DOWNLOAD_TIMEOUT
+        
+        post_scrape_downloads = db.get_setting('youtube_post_scrape_downloads')
+        if post_scrape_downloads is None:
+            post_scrape_downloads = config.YOUTUBE_POST_SCRAPE_DOWNLOADS
+        
         return {
-            "youtube_cache_max_size_gb": float(max_size_gb)
+            "youtube_cache_max_size_gb": float(max_size_gb),
+            "youtube_parallel_downloads": int(parallel_downloads),
+            "youtube_download_timeout": int(download_timeout),
+            "youtube_post_scrape_downloads": int(post_scrape_downloads)
         }
     except Exception as e:
         logger.error(f"Error getting cache settings: {e}")
@@ -1596,7 +1688,7 @@ async def get_cache_settings(token: str = Depends(verify_admin_token)):
 
 @app.put("/api/admin/settings/cache")
 async def update_cache_settings(settings: dict, token: str = Depends(verify_admin_token)):
-    """Update YouTube cache settings"""
+    """Update YouTube cache and download settings"""
     try:
         if 'youtube_cache_max_size_gb' in settings:
             new_size = float(settings['youtube_cache_max_size_gb'])
@@ -1617,6 +1709,61 @@ async def update_cache_settings(settings: dict, token: str = Depends(verify_admi
             youtube_cache.update_max_size(new_size)
             
             logger.info(f"📦 [CACHE] Settings updated: max_size={new_size} GB")
+        
+        if 'youtube_parallel_downloads' in settings:
+            new_parallel = int(settings['youtube_parallel_downloads'])
+            
+            # Validate (must be between 1 and 10)
+            if new_parallel < 1 or new_parallel > 10:
+                raise HTTPException(status_code=400, detail="Parallel downloads must be between 1 and 10")
+            
+            # Save to database
+            db.set_setting(
+                'youtube_parallel_downloads',
+                new_parallel,
+                category='cache',
+                description='Maximum number of parallel YouTube downloads'
+            )
+            
+            # Update download manager
+            youtube_download_manager.update_max_parallel(new_parallel)
+            
+            logger.info(f"🔧 [DOWNLOAD-MGR] Settings updated: max_parallel={new_parallel}")
+        
+        if 'youtube_download_timeout' in settings:
+            new_timeout = int(settings['youtube_download_timeout'])
+            
+            # Validate (must be between 60 and 600 seconds)
+            if new_timeout < 60 or new_timeout > 600:
+                raise HTTPException(status_code=400, detail="Download timeout must be between 60 and 600 seconds")
+            
+            # Save to database
+            db.set_setting(
+                'youtube_download_timeout',
+                new_timeout,
+                category='cache',
+                description='Timeout for individual YouTube downloads in seconds'
+            )
+            
+            # Note: timeout change requires restart to take effect
+            logger.info(f"🔧 [DOWNLOAD-MGR] Settings updated: timeout={new_timeout}s (requires restart)")
+        
+        if 'youtube_post_scrape_downloads' in settings:
+            new_post_scrape = int(settings['youtube_post_scrape_downloads'])
+            
+            # Validate (must be between 1 and 10)
+            if new_post_scrape < 1 or new_post_scrape > 10:
+                raise HTTPException(status_code=400, detail="Post-scrape parallel downloads must be between 1 and 10")
+            
+            # Save to database
+            db.set_setting(
+                'youtube_post_scrape_downloads',
+                new_post_scrape,
+                category='cache',
+                description='Parallel downloads after scraping completes (1-10)'
+            )
+            
+            logger.info(f"🔧 [DOWNLOAD-MGR] Settings updated: post_scrape_downloads={new_post_scrape}")
         
         return {"message": "Cache settings updated successfully", "settings": settings}
     except HTTPException:

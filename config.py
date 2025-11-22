@@ -101,3 +101,6 @@ LINK_EXTRACTION = {
 # YouTube Cache settings
 YOUTUBE_CACHE_DIR = Path("youtube_cache")
 YOUTUBE_CACHE_MAX_SIZE_GB = 5.0  # Maximum cache size in gigabytes (can use decimals)
+YOUTUBE_PARALLEL_DOWNLOADS = 3  # Maximum number of parallel downloads for real-time player (1-10)
+YOUTUBE_DOWNLOAD_TIMEOUT = 300  # Timeout for individual downloads in seconds (5 minutes)
+YOUTUBE_POST_SCRAPE_DOWNLOADS = 1  # Parallel downloads after scraping completes (1-10, default 1)

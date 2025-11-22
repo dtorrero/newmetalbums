@@ -24,6 +24,7 @@ interface YouTubeTrack {
   title: string;
   duration: number;
   stream_url: string;
+  video_id?: string;
   thumbnail?: string;
 }
 
@@ -121,41 +122,45 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
         if (data.found) {
           if (data.type === 'playlist' && data.tracks && data.tracks.length > 0) {
             console.log('🎬 [YOUTUBE] Playlist with', data.tracks.length, 'tracks');
-            // Extract video IDs and use cached audio endpoint
+            
+            // Use video_id from backend response (already included in tracks)
             const cachedTracks = data.tracks.map((track: any) => {
-              // Extract video ID from the original URL
-              const videoIdMatch = urlToFetch.match(/[?&]v=([^&]+)/);
-              const videoId = videoIdMatch ? videoIdMatch[1] : null;
+              const videoId = track.video_id;
               
               return {
                 ...track,
-                stream_url: videoId ? 
-                  `${baseUrl}/api/youtube/audio/${videoId}` : 
-                  null
+                stream_url: videoId ? `${baseUrl}/api/youtube/audio/${videoId}` : null
               };
             });
+            
             setTracks(cachedTracks);
+            
+            // Note: Downloads are now automatically queued by the backend in /api/youtube/stream
+            console.log('🎬 [YOUTUBE] Backend has queued', data.tracks.length, 'videos for download');
           } else if (data.type === 'video') {
-            // Single video - extract video ID and use cached audio endpoint
+            // Single video - use video_id from backend response
             console.log('🎬 [YOUTUBE] Single video');
             
-            // Extract video ID from URL
-            const videoIdMatch = urlToFetch.match(/[?&]v=([^&]+)/);
-            const videoId = videoIdMatch ? videoIdMatch[1] : null;
+            const videoId = data.video_id;
             
             if (videoId) {
               const cachedUrl = `${baseUrl}/api/youtube/audio/${videoId}`;
+              console.log('🎬 [YOUTUBE] Video ID:', videoId);
               console.log('🎬 [YOUTUBE] Cached audio URL:', cachedUrl);
               
               setTracks([{
                 title: data.title,
                 duration: data.duration,
                 stream_url: cachedUrl,
+                video_id: videoId,
                 thumbnail: data.thumbnail,
               }]);
+              
+              // Note: Download is now automatically queued by the backend in /api/youtube/stream
+              console.log('🎬 [YOUTUBE] Backend has queued video for download:', videoId);
             } else {
-              console.error('🎬 [YOUTUBE] Could not extract video ID from URL');
-              setError('Could not extract video ID');
+              console.error('🎬 [YOUTUBE] No video ID in backend response');
+              setError('Could not get video ID from backend');
             }
           } else {
             console.error('🎬 [YOUTUBE] No playable content in response:', data);
@@ -244,6 +249,32 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     const handleWaiting = () => {
       setTrackLoading(true);  // Buffering
     };
+    const handleError = (e: Event) => {
+      console.error('🎬 [YOUTUBE] Audio error:', e);
+      const currentTrack = tracks[currentTrackIndex];
+      
+      // Check if it's a 404 (file not available)
+      if (audio.error) {
+        console.error('🎬 [YOUTUBE] Error code:', audio.error.code, 'Message:', audio.error.message);
+        
+        if (audio.error.code === 4) { // MEDIA_ERR_SRC_NOT_SUPPORTED (includes 404)
+          setDownloadNotification(
+            `Audio file not ready yet. Downloading in background... (Track: ${currentTrack?.title || 'Unknown'})`
+          );
+          setTrackLoading(false);
+          setIsPlaying(false);
+          
+          // Auto-retry after a delay
+          setTimeout(() => {
+            console.log('🎬 [YOUTUBE] Retrying track load...');
+            if (audioRef.current && currentTrack?.stream_url) {
+              audioRef.current.src = currentTrack.stream_url;
+              audioRef.current.load();
+            }
+          }, 5000); // Retry after 5 seconds
+        }
+      }
+    };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
@@ -253,6 +284,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('canplaythrough', handleCanPlayThrough);
     audio.addEventListener('waiting', handleWaiting);
+    audio.addEventListener('error', handleError);
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
@@ -263,8 +295,9 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
       audio.removeEventListener('pause', handlePause);
       audio.removeEventListener('canplaythrough', handleCanPlayThrough);
       audio.removeEventListener('waiting', handleWaiting);
+      audio.removeEventListener('error', handleError);
     };
-  }, [currentTrackIndex, tracks.length]);
+  }, [currentTrackIndex, tracks]);
 
   // Load track when index changes - SIMPLIFIED
   useEffect(() => {
