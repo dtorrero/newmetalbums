@@ -4,7 +4,7 @@ FROM python:3.11-bullseye
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies for Playwright
+# Install system dependencies for Playwright and yt-dlp
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     libgbm1 \
     libasound2 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -36,7 +37,7 @@ COPY web_server.py ./
 COPY config.py ./
 
 # Create necessary directories
-RUN mkdir -p covers data
+RUN mkdir -p covers data youtube_cache
 
 # Expose port
 EXPOSE 8000

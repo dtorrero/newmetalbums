@@ -12,9 +12,10 @@ services:
     expose:
       - "8000"
     volumes:
-      # Persist database and album covers
+      # Persist database, album covers, and YouTube audio cache
       - ./data:/app/data
       - ./covers:/app/covers
+      - ./youtube_cache:/app/youtube_cache
     environment:
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
@@ -50,7 +51,8 @@ networks:
   newmetalbums-network:
     driver: bridge
 
-# Persistent volumes for data and covers
+# Persistent volumes for data, covers, and YouTube cache
 volumes:
   data:
   covers:
+  youtube_cache:
