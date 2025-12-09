@@ -1505,6 +1505,250 @@ async def verify_playable_urls(
         "min_similarity": min_similarity
     }
 
+@app.get("/api/admin/test-youtube-search")
+async def test_youtube_search(
+    band_name: str = Query("AngelMaker", description="Band name to search"),
+    album_name: str = Query("This Used to Be Heaven", description="Album name to search")
+    # No auth required - diagnostic endpoint for troubleshooting
+):
+    """
+    Detailed YouTube search diagnostic endpoint.
+    Tests the complete YouTube search flow and returns detailed results.
+    """
+    import time
+    import asyncio
+    from fuzzywuzzy import fuzz
+    
+    diagnostic_log = []
+    start_time = time.time()
+    
+    def log(message):
+        diagnostic_log.append(f"[{time.time() - start_time:.2f}s] {message}")
+        logger.info(message)
+    
+    try:
+        log("🔧 Starting YouTube search diagnostic")
+        log(f"   Band: {band_name}")
+        log(f"   Album: {album_name}")
+        
+        # Step 1: Check Playwright availability
+        log("1️⃣ Checking Playwright installation...")
+        try:
+            from playwright.async_api import async_playwright
+            log("   ✓ Playwright module imported successfully")
+        except ImportError as e:
+            log(f"   ✗ Playwright import failed: {e}")
+            raise
+        
+        # Step 2: Initialize scraper
+        log("2️⃣ Initializing MetalArchivesScraper...")
+        from scraper import MetalArchivesScraper
+        from platform_verifier import PlatformVerifier
+        
+        scraper = MetalArchivesScraper(headless=True)
+        try:
+            await scraper.initialize()
+            log("   ✓ Scraper initialized successfully")
+            log(f"   Browser: Chromium (headless)")
+        except Exception as e:
+            log(f"   ✗ Scraper initialization failed: {e}")
+            raise
+        
+        verifier = PlatformVerifier(scraper.page)
+        log("   ✓ PlatformVerifier created")
+        
+        try:
+            # Step 3: Construct search URL
+            search_query = f"{band_name} {album_name} full album"
+            search_url = f"https://www.youtube.com/results?search_query={search_query.replace(' ', '+')}"
+            log(f"3️⃣ Navigating to YouTube...")
+            log(f"   URL: {search_url}")
+            
+            # Step 4: Navigate to YouTube
+            try:
+                await scraper.page.goto(search_url, wait_until='networkidle', timeout=30000)
+                log("   ✓ Page loaded successfully")
+                await asyncio.sleep(2)
+            except Exception as e:
+                log(f"   ✗ Navigation failed: {e}")
+                raise
+            
+            # Step 5: Check page title
+            try:
+                page_title = await scraper.page.title()
+                log(f"   Page title: {page_title}")
+            except Exception as e:
+                log(f"   ⚠️  Could not get page title: {e}")
+            
+            # Step 6: Extract search results
+            log("4️⃣ Extracting search results...")
+            try:
+                results = await scraper.page.evaluate('''() => {
+                    const items = [];
+                    const videoElements = document.querySelectorAll('ytd-video-renderer, ytd-playlist-renderer');
+                    
+                    videoElements.forEach(el => {
+                        const titleEl = el.querySelector('#video-title, h3 a');
+                        const linkEl = el.querySelector('a#thumbnail, a#video-title');
+                        
+                        if (titleEl && linkEl) {
+                            const title = titleEl.textContent?.trim() || titleEl.getAttribute('title') || '';
+                            const href = linkEl.getAttribute('href') || '';
+                            
+                            if (title && href) {
+                                items.push({
+                                    title: title,
+                                    url: href.startsWith('http') ? href : 'https://www.youtube.com' + href,
+                                    isPlaylist: href.includes('list=')
+                                });
+                            }
+                        }
+                    });
+                    
+                    return items;
+                }''')
+                log(f"   ✓ Found {len(results)} search results")
+            except Exception as e:
+                log(f"   ✗ Failed to extract results: {e}")
+                raise
+            
+            if not results:
+                log("   ⚠️  No results found - possible bot detection or page structure change")
+                
+                # Get page content for debugging
+                try:
+                    content = await scraper.page.content()
+                    if 'captcha' in content.lower():
+                        log("   ⚠️  CAPTCHA detected in page content")
+                    if 'unusual traffic' in content.lower():
+                        log("   ⚠️  'Unusual traffic' message detected")
+                    if 'consent' in content.lower():
+                        log("   ⚠️  Cookie consent detected")
+                except:
+                    pass
+            
+            # Step 7: Fuzzy match results
+            log("5️⃣ Performing fuzzy matching...")
+            search_term = f"{band_name} {album_name}".lower()
+            min_similarity = 90
+            
+            matches = []
+            detailed_results = []
+            
+            for i, result in enumerate(results[:10], 1):
+                title_lower = result['title'].lower()
+                
+                # Calculate similarity scores
+                full_score = fuzz.token_sort_ratio(search_term, title_lower)
+                album_score = fuzz.partial_ratio(album_name.lower(), title_lower)
+                band_score = fuzz.partial_ratio(band_name.lower(), title_lower)
+                
+                # Boost score if "full album" is in title
+                boost = 10 if 'full album' in title_lower else 0
+                
+                # Boost if both band and album are present
+                if band_score > 70 and album_score > 70:
+                    score = max(full_score, (album_score + band_score) // 2) + boost
+                else:
+                    score = max(full_score, album_score) + boost
+                
+                final_score = min(score, 100)
+                
+                match_status = "✓ MATCH" if final_score >= min_similarity else "✗ Below threshold"
+                
+                detailed_results.append({
+                    "rank": i,
+                    "title": result['title'],
+                    "url": result['url'],
+                    "is_playlist": result['isPlaylist'],
+                    "scores": {
+                        "final": final_score,
+                        "full_match": full_score,
+                        "album_match": album_score,
+                        "band_match": band_score,
+                        "boost": boost
+                    },
+                    "matched": final_score >= min_similarity
+                })
+                
+                if final_score >= min_similarity:
+                    matches.append({
+                        'title': result['title'],
+                        'url': result['url'],
+                        'score': final_score,
+                        'isPlaylist': result['isPlaylist']
+                    })
+                    log(f"   {match_status} [{final_score}%] {result['title'][:60]}")
+            
+            # Step 8: Return best match
+            if matches:
+                best_match = matches[0]
+                log(f"6️⃣ ✓ SUCCESS! Best match found:")
+                log(f"   Score: {best_match['score']}%")
+                log(f"   Title: {best_match['title']}")
+                log(f"   Type: {'Playlist' if best_match['isPlaylist'] else 'Video'}")
+                
+                # Call the actual search function to get formatted result
+                final_result = await verifier.search_youtube_directly(
+                    album_name=album_name,
+                    band_name=band_name,
+                    min_similarity=90
+                )
+                
+                return {
+                    "success": True,
+                    "search_query": search_query,
+                    "total_results": len(results),
+                    "matches_found": len(matches),
+                    "best_match": {
+                        "title": best_match['title'],
+                        "url": best_match['url'],
+                        "score": best_match['score'],
+                        "type": 'playlist' if best_match['isPlaylist'] else 'video'
+                    },
+                    "verification_result": final_result,
+                    "detailed_results": detailed_results[:5],  # Top 5 results
+                    "diagnostic_log": diagnostic_log,
+                    "execution_time": f"{time.time() - start_time:.2f}s"
+                }
+            else:
+                log(f"6️⃣ ✗ FAILED! No matches above {min_similarity}% threshold")
+                log(f"   This could mean:")
+                log(f"   - Album doesn't exist on YouTube")
+                log(f"   - Search results are too different from album name")
+                log(f"   - Bot detection is affecting results")
+                
+                return {
+                    "success": False,
+                    "search_query": search_query,
+                    "total_results": len(results),
+                    "matches_found": 0,
+                    "reason": f"No matches above {min_similarity}% similarity threshold",
+                    "detailed_results": detailed_results[:5],
+                    "diagnostic_log": diagnostic_log,
+                    "execution_time": f"{time.time() - start_time:.2f}s"
+                }
+                
+        finally:
+            await scraper.close()
+            log("🔧 Scraper closed")
+            
+    except Exception as e:
+        log(f"❌ CRITICAL ERROR: {e}")
+        logger.error(f"YouTube search test error: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        log(f"Traceback:\n{error_trace}")
+        
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": error_trace,
+            "diagnostic_log": diagnostic_log,
+            "execution_time": f"{time.time() - start_time:.2f}s"
+        }
+
 @app.delete("/api/admin/data/{date}")
 async def delete_data_by_date(date: str, token: str = Depends(verify_admin_token)):
     """Delete all data for a specific date"""
